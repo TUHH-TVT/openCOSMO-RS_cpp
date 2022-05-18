@@ -1,0 +1,8 @@
+.vscode/*
+.vs/*
+bindings/temporary/*
+bindings/Debug/*
+bindings/Release/*
+bindings/openCOSMORS.mex*
+bindings/openCOSMORS.cpython*
+bindings/.vscode/*
