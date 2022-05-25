@@ -16,7 +16,10 @@ options = {
                                                                     # you still need to catch the error and handle it approprietlywhether to skip COSMOSPACE errors in the case a parameter makes the equations unsolvable
     # input switches
     'sw_SR_COSMOfiles_type': 'ORCA_COSMO_TZVPD',                # ['Turbomole_COSMO_TZVP', 'Turbomole_COSMO_TZVPD_FINE', 'ORCA_COSMO_TZVPD']
-    'sw_SR_combTerm': 2,                                            # [1, 2, 3, 4, 5]
+    'sw_SR_combTerm': 1, # 0 No combinatorial term
+                         # 1 to use the combinatorial term by Staverman-Guggenheim
+                         # 2 to use the combinatorial term by Klamt (2003)
+                         # 3 to use modified Staverman-Guggenheim combinatorial term with exponential scaling */
 
     # optional calculation switches
     'sw_SR_alwaysReloadSigmaProfiles': 0,

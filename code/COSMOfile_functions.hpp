@@ -275,7 +275,7 @@ molecule getMoleculeFromORCACOSMOfile(std::string& path) {
 
             int segmentAtomIndex;
             double segmentPosition_X, segmentPosition_Y, segmentPosition_Z, segmentArea, segmentCharge;
-            parse_line(currentLine, "%lf %lf %lf %lf %*lf %lf %i", &segmentPosition_X, &segmentPosition_Y, &segmentPosition_Z, &segmentArea, &segmentCharge, &segmentAtomIndex);
+            parse_line(currentLine, "%lf %lf %lf %lf %*lf %lf %*lf %*lf %*lf %i", &segmentPosition_X, &segmentPosition_Y, &segmentPosition_Z, &segmentArea, &segmentCharge, &segmentAtomIndex);
             segmentAtomIndices.push_back(segmentAtomIndex);
 
             segmentPositions_X.push_back(0.529177249 * segmentPosition_X);
@@ -288,6 +288,7 @@ molecule getMoleculeFromORCACOSMOfile(std::string& path) {
             segmentSigmas.push_back(segmentCharge / segmentArea);
         }
     }
+
     cosmoFile.close();
 
     newMolecule.atomPositions = Eigen::MatrixXd::Zero(atomPositions_X.size(), 3);
