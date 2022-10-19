@@ -4,10 +4,7 @@
 This is an open source implementation of the COSMO-RS model that uses multiple descriptor sigma profiles. The corresponding publication to this repository is:
 
 #### Clone it 
-
-After cloning this repository to build you will need to get the respective submodules running the following commands inside the cloned repository folder:
-- git submodule init
-- git submodule update
+>  git clone --recursive --shallow-submodules https://github.com/TUHH-TVT/openCOSMO-RS_cpp.git
 ***
 #### Build for python
 > Build on **Windows** with Visual Studio (tested with vs community 2019).
@@ -19,8 +16,25 @@ After cloning this repository to build you will need to get the respective submo
 >   - [More information here](https://docs.microsoft.com/en-us/visualstudio/python/working-with-c-cpp-python-in-visual-studio?view=vs-2019)
 > - Please check whether the specified instruction set matches your target hardware
 >     - Properties > Configuration Properties > C/C++ > Code Generation > Enable Enhanced Instruction Set
->     - Supported are AVX, AVX2, if you select any other, SSE3 will be used.
-> - A small python project is also included showing how to use it from within visual studio.
+>     - Supported are SSE3, AVX, AVX2/FMA, defaults to SSE3.
+>     - If this is not set correctly, in the best case it will run slower than it could, in the worsed cased it will crash.
+> - A small python project is also included in the bindings folder showing how to use it from within visual studio. To test, build and execute run_example.py.
+
+> Build on **Windows** with cmake (tested with vs community 2019).
+> - To run with a specific conda environment, activate the environment before running the commands to build.
+> - Please check whether the specified instruction set matches your target hardware
+>     - you can change this in CMakeLists.txt by setting the appropriate compilation flag.
+>     - Supported are SSE3, AVX, AVX2/FMA, defaults to SSE3.
+>     - If this is not set correctly, in the best case it will run slower than it could, in the worsed cased it will crash.
+> - Commands to build
+>     - cd _openCOSMO-RS_cpp_
+>     - mkdir _build_
+>     - cd _build_
+>     - cmake ..
+>     - cmake --build .
+>     - the build will default to a debug build. For a release build, use the following:
+>     - cmake --build . --config Release
+> - A small python project is also included in the bindings folder showing how to use it from within visual studio. To test, build, move the *.pyd file into the bindings folder and execute run_example.py.
 
 > Build on **Linux** with gcc (tested with gcc version 9.2.0 and python 3.6):
 > - Execute the following command within the bindings folder after adding the corrects paths. (_pybind11_include_folder_, _eigen_include_folder_, _python_include_folder_)
@@ -31,7 +45,7 @@ After cloning this repository to build you will need to get the respective submo
 
 ***
 #### Build for MATLAB
-> Build on **Windows** and **Linux** (tested only on windows with MSVC and MATLAB 2019a):
+> Build on **Windows** and **Linux** (tested only on windows with vs community 2019 and MATLAB 2019a):
 > - Ensure your matlab include folder is set correctly in the file _code/bindings_forMATLAB.cpp_:
 >    - #include "_matlabroot_\extern\include\mex.hpp"
 >    - #include "_matlabroot_\\extern\include\mexAdapter.hpp"

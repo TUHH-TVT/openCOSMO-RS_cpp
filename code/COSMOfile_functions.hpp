@@ -45,7 +45,7 @@ int findAtomicNumberByName(std::string& name) {
     throw std::runtime_error("Could not find the atomic number for followng atom: " + name);
 }
 
-std::string scan_for(std::ifstream& haystack_file, std::string needle, std::string mode = "start", int numberOfLinesToSkip = 0) {
+std::string scan_for(std::ifstream& haystack_file, std::string needle, std::string mode = "start", int numberOfLinesToSkip = 0, bool throwErrorIfNotFound = true) {
     
     std::string currentLine;
     std::string matchingLine = "";
@@ -73,7 +73,12 @@ std::string scan_for(std::ifstream& haystack_file, std::string needle, std::stri
     if (matchingLine != "")
         return matchingLine;
 
-    throw std::runtime_error("the following string was not found while reading haystack_file: " + needle);
+    if (throwErrorIfNotFound) {
+        throw std::runtime_error("the following string was not found while reading haystack_file: " + needle);
+    }
+    else {
+        return "";
+    }
 }
 
 molecule getMoleculeFromTurbomoleCOSMOfile(std::string& path) {
@@ -286,6 +291,9 @@ molecule getMoleculeFromORCACOSMOfile(std::string& path) {
             segmentAreas.push_back(segmentArea);
 
             segmentSigmas.push_back(segmentCharge / segmentArea);
+        }
+        else {
+            break;
         }
     }
 

@@ -16,18 +16,6 @@
 #define __FMA__ 1
 #endif
 
-#if defined(__FMA__)
-#pragma message("Vectorization: FMA")
-std::string vectorization_level = "Vectorization: FMA";
-#elif defined(__AVX__)
-#pragma message("Vectorization: AVX")
-std::string vectorization_level = "Vectorization: AVX";
-#else
-#define __SSE3__ 1
-#pragma message("Vectorization: SSE3")
-std::string vectorization_level = "Vectorization: SSE3";
-#endif
-
 #if !defined(__SSE3__) && !defined(__AVX__) && !defined(__FMA__)  
 #error Please specify exactly one of the following compiler switches to set the vectorization level: SSE3, AVX, FMA, AVX2
 #endif
@@ -38,12 +26,32 @@ std::string vectorization_level = "Vectorization: SSE3";
 #error If parallelization through OPENMP is enbled and PRINT_DEBUG_INFO should not be set 
 #endif
 
-#if defined(_OPENMP)
-std::string OPENMP_parallelization = "OPENMP: activated";
-#pragma message("OPENMP: activated")
+#if defined(_DEBUG) || defined(DEBUG)
+std::string compilation_mode = " compile mode: DEBUG";
+#pragma message(" compile mode: DEBUG")
 #else
-std::string OPENMP_parallelization = "OPENMP: deactivated";
-#pragma message("OPENMP: deactivated")
+std::string compilation_mode = " compile mode: RELEASE";
+#pragma message(" compile mode: RELEASE")
+#endif
+
+#if defined(_OPENMP)
+std::string OPENMP_parallelization = "       openmp: activated";
+#pragma message("       openmp: activated")
+#else
+std::string OPENMP_parallelization = "      openmp: deactivated";
+#pragma message("       openmp: deactivated")
+#endif
+
+#if defined(__FMA__)
+#pragma message("vectorization: FMA")
+std::string vectorization_level = "vectorization: FMA";
+#elif defined(__AVX__)
+#pragma message("vectorization: AVX")
+std::string vectorization_level = "vectorization: AVX";
+#else
+#define __SSE3__ 1
+#pragma message("vectorization: SSE3")
+std::string vectorization_level = "vectorization: SSE3";
 #endif
 
 #if defined(__GNUC__)

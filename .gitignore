@@ -6,3 +6,4 @@ bindings/Release/*
 bindings/openCOSMORS.mex*
 bindings/openCOSMORS.cpython*
 bindings/.vscode/*
+build/*

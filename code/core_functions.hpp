@@ -89,6 +89,9 @@ void initialize(parameters& param) {
 
     param.ChargeRaster.clear();
     param.exp_param.clear();
+    param.R_i = std::vector<double>(118, 0.0);
+    param.R_i_COSMO = std::vector<double>(118, 0.0);
+    param.HBClassElmnt = std::vector<int>(300, 0);
 
     // Initialize hydrogen bond classes of the elements HBClassElmnt
     // 0 : only non HB  | 1 : potential donor  | 2 : potential acceptor | 3 : potential donor or acceptor
@@ -126,7 +129,7 @@ void initialize(parameters& param) {
         param.ChargeRaster.push_back(param.sigmaMin + param.sigmaStep * i);
     }
 
-    display("\n\nCOSMORS_TUHH compile options:\n" + vectorization_level + "\n" + OPENMP_parallelization + "\n");
+    display("\nBINARY SPECS\n-------------------------\n" + compilation_mode + "\n" + OPENMP_parallelization + "\n" + vectorization_level + "\n-------------------------\n\n");
 }
 
 void averageAndClusterSegments(parameters& param, molecule& _molecule, int approximateNumberOfSegmentTypes = 0) {

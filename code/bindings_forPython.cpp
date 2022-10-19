@@ -43,32 +43,45 @@ void loadParametersOnPython(py::dict parameters) {
 	param.SigmaHB = parameters["SigmaHB"].cast<double>();
 
 	param.Rav = parameters["Rav"].cast<double>();
-	param.RavCorr = parameters["RavCorr"].cast<double>();
-	param.fCorr = parameters["fCorr"].cast<double>();
 
-	param.comb_SG_A_std = parameters["comb_SG_A_std"].cast<double>();
-	param.comb_SG_z_coord = parameters["comb_SG_z_coord"].cast<double>();
-	param.comb_modSG_exp = parameters["comb_modSG_exp"].cast<double>();
-
-
-	param.comb_lambda0 = parameters["comb_lambda0"].cast<double>();
-	param.comb_lambda1 = parameters["comb_lambda1"].cast<double>();
-	param.comb_lambda2 = parameters["comb_lambda2"].cast<double>();
-
-	param.comb_SGG_lambda = parameters["comb_SGG_lambda"].cast<double>();
-	param.comb_SGG_beta = parameters["comb_SGG_beta"].cast<double>();
-
-	py::dict radii = parameters["radii"];
-
-	for (auto item : radii) {
-		std::string key = item.first.cast<std::string>();
-		param.R_i[std::stoi(key)] = item.second.cast<double>();
+	if (param.sw_misfit > 0) {
+		param.fCorr = parameters["fCorr"].cast<double>();
+		param.RavCorr = parameters["RavCorr"].cast<double>();
 	}
 
+	if (param.sw_combTerm == 1 || param.sw_combTerm == 3) {
+		param.comb_SG_A_std = parameters["comb_SG_A_std"].cast<double>();
+		param.comb_SG_z_coord = parameters["comb_SG_z_coord"].cast<double>();
+
+		if(param.sw_combTerm == 3)
+			param.comb_modSG_exp = parameters["comb_modSG_exp"].cast<double>();
+	}
+	
+	if (param.sw_combTerm == 2 || param.sw_combTerm == 5) {
+		param.comb_lambda0 = parameters["comb_lambda0"].cast<double>();
+		param.comb_lambda1 = parameters["comb_lambda1"].cast<double>();
+		param.comb_lambda2 = parameters["comb_lambda2"].cast<double>();
+	}
+
+	if (param.sw_combTerm == 4) {
+		param.comb_SGG_lambda = parameters["comb_SGG_lambda"].cast<double>();
+		param.comb_SGG_beta = parameters["comb_SGG_beta"].cast<double>();
+	}
+
+	if (parameters.contains("radii")) {
+		py::dict radii = parameters["radii"];
+
+		for (auto item : radii) {
+			std::string key = item.first.cast<std::string>();
+			param.R_i[std::stoi(key)] = item.second.cast<double>();
+		}
+	}
 	// experimental parameters for prototyping
-	py::dict exp = parameters["exp"];
-	for (auto item : exp)
-		param.exp_param[item.first.cast<std::string>()] = item.second.cast<double>();
+	if (parameters.contains("exp")) {
+		py::dict exp = parameters["exp"];
+		for (auto item : exp)
+			param.exp_param[item.first.cast<std::string>()] = item.second.cast<double>();
+	}
 
 }
 
