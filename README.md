@@ -54,3 +54,13 @@ This is an open source implementation of the COSMO-RS model that uses multiple d
 ***
 #### Running
 > An exemplary file to run the model on python and matlab is included in the bindings folder.
+
+
+
+## Other COSMO-RS related projects
+
+The reader might be also interested in the following related projects:
+ - [openCOSMO-RS_py](https://github.com/TUHH-TVT/openCOSMO-RS_py)
+ - [LVPP sigma profile database](https://github.com/lvpp/sigma)
+ - [Benchmark COSMO-SAC implementation](https://github.com/usnistgov/COSMOSAC)
+ - [Pysac](https://github.com/lvpp/pysac)
