@@ -24,9 +24,6 @@ void displayTimeOnPython(std::string message, unsigned long durationInMicrosecon
 }
 
 void initializeOnPython() {
-
-	n_ex = 0;
-
 	display = displayOnPython;
 	displayTime = displayTimeOnPython;
 
@@ -66,6 +63,18 @@ void loadParametersOnPython(py::dict parameters) {
 	if (param.sw_combTerm == 4) {
 		param.comb_SGG_lambda = parameters["comb_SGG_lambda"].cast<double>();
 		param.comb_SGG_beta = parameters["comb_SGG_beta"].cast<double>();
+	}
+
+	if (parameters.contains("dGsolv_eta")) {
+		param.dGsolv_eta = parameters["dGsolv_eta"].cast<double>();
+		param.dGsolv_omega_ring = parameters["dGsolv_omega_ring"].cast<double>();
+
+		py::dict dGsolv_tau = parameters["dGsolv_tau"];
+
+		for (auto item : dGsolv_tau) {
+			std::string key = item.first.cast<std::string>();
+			param.dGsolv_tau[std::stoi(key)] = item.second.cast<double>();
+		}
 	}
 
 	if (parameters.contains("radii")) {
@@ -224,7 +233,7 @@ void loadCalculationsOnPython(py::list calculationsOnPython) {
 
 		// reference states
 		auto referenceStateTypes = py::array_t<int>(calculationDict["reference_state_types"]).unchecked<1>();
-		for (int j = 0; j < (size_t)referenceStateConcentrations.shape(0); j++) {
+		for (int j = 0; j < (size_t)referenceStateTypes.shape(0); j++) {
 
 
 			int referenceStateType = referenceStateTypes(j);
@@ -232,9 +241,12 @@ void loadCalculationsOnPython(py::list calculationsOnPython) {
 			newCalculation.referenceStateType.push_back((unsigned short)referenceStateType);
 			
 			float tempSumOfConcentrations = 0;
-			for (int k = 0; k < (size_t)referenceStateConcentrations.shape(1); k++) {
-				tempSumOfConcentrations += (float)referenceStateConcentrations(j, k);
+			if (calculationDict.contains("reference_state_concentrations")) {
+				for (int k = 0; k < (size_t)referenceStateConcentrations.shape(1); k++) {
+					tempSumOfConcentrations += (float)referenceStateConcentrations(j, k);
+				}
 			}
+
 
 			if (referenceStateType == 0) { // Pure component
 				
@@ -308,7 +320,7 @@ void loadCalculationsOnPython(py::list calculationsOnPython) {
 				}
 				newCalculation.referenceStateCalculationIndices.push_back(thisReferenceStateCalculationIndices);
 			}
-			else if (referenceStateType == 3) { // COSMO
+			else if (referenceStateType == 3 || referenceStateType == 4) { // COSMO or COSMO for solvation energy calculation
 
 				if (tempSumOfConcentrations != 0) {
 					throw std::runtime_error("A reference state concentration was specified for a calculation with reference state COSMO, this does not make sense.");
@@ -340,6 +352,13 @@ void loadCalculationsOnPython(py::list calculationsOnPython) {
 		new (&newCalculation.lnGammaTotal) Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>>(tempArray.mutable_data(),
 			int(newCalculation.originalNumberOfCalculations),
 			int(newCalculation.components.size()));
+
+		if (calculationDict.contains("dGsolv")) {
+			tempArray = py::array_t<float>(calculationDict["dGsolv"]);
+			new (&newCalculation.dGsolv) Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>>(tempArray.mutable_data(),
+				int(newCalculation.originalNumberOfCalculations),
+				1);
+		}
 
 		if (param.sw_calculateContactStatisticsAndAdditionalProperties > 0) {
 
@@ -402,6 +421,7 @@ py::list calculateOnPython(py::dict parameters, py::list calculationsOnPython, b
 		calculationIndices[i] = calculationsOnPython[i]["index"].cast<int>();
 
 		param.sw_reloadConcentrations = 0;
+		param.sw_reloadReferenceConcentrations = 0;
 
 		if (reloadConcentrations == true) {
 			param.sw_reloadConcentrations = 1;
@@ -425,7 +445,37 @@ py::list calculateOnPython(py::dict parameters, py::list calculationsOnPython, b
 			}
 		}
 		if (reloadReferenceConcentrations == true) {
-			throw std::runtime_error("reloadReferenceConcentrations has not been implemented yet.");
+			param.sw_reloadReferenceConcentrations = 1;
+			auto referenceStateTypes = py::array_t<int>(calculationsOnPython[i]["reference_state_types"]).unchecked<1>();
+			auto referenceStateConcentrations = py::array_t<double>(calculationsOnPython[i]["reference_state_concentrations"]).unchecked<2>();
+
+
+			for (int j = 0; j < (size_t)referenceStateConcentrations.shape(0); j++) {
+				int referenceStateType = referenceStateTypes(j);
+				if (referenceStateType != 2) {
+					throw std::runtime_error("reloadReferenceConcentrations only makes sense if the referenceStateTypes == 2.\n");
+				}
+			}
+			if (calculations[calculationIndices[i]].concentrations.size() != calculations[calculationIndices[i]].originalNumberOfCalculations * 2) {
+				throw std::runtime_error("The implementation currently assumes that every concentratoin has a unique reference concentration, this could and should be changed in the future.\n");
+			}
+
+			for (int h = 0; h < calculations[calculationIndices[i]].originalNumberOfCalculations; h++) {
+
+				std::vector<int> referenceStateCalculationIndices = calculations[calculationIndices[i]].referenceStateCalculationIndices[h];
+
+				float tempSumOfConcentrations = 0;
+				for (int k = 0; k < calculations[calculationIndices[i]].components.size(); k++) {
+					int referenceStateCalculationIndex = referenceStateCalculationIndices[k];
+					float val = (float)referenceStateConcentrations(h, k);
+					tempSumOfConcentrations += val;
+					calculations[calculationIndices[i]].concentrations[referenceStateCalculationIndex][k] = val;
+				}
+
+				if (abs(1.0f - tempSumOfConcentrations) > MAX_CONCENTRATION_DIFF_FROM_ZERO) {
+					throw std::runtime_error("A concentration does not add up to unity.");
+				}
+			}
 		}
 	}
 

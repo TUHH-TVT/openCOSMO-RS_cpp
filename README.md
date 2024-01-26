@@ -52,6 +52,30 @@ This is an open source implementation of the COSMO-RS model that uses multiple d
 > - _matlabroot_ can be found by executing said command in MATLAB
 > - Execute the following file within the bindings folder: _compile_mex.m_
 ***
+
+#### Build as standalone binary
+
+> Build on **Windows** with cmake (tested with vs community 2019).
+> - Please check whether the specified instruction set matches your target hardware
+>     - you can change this in CMakeLists.txt by setting the appropriate compilation flag.
+>     - Supported are SSE3, AVX, AVX2/FMA, defaults to SSE3.
+>     - If this is not set correctly, in the best case it will run slower than it could, in the worst cased it will crash.
+> - Commands to build
+>     - cd _openCOSMO-RS_cpp_
+>     - mkdir _build_
+>     - cd _build_
+>     - cmake .. -DBINARY=
+>     - cmake --build .
+>     - the build will default to a debug build. For a release build, use the following:
+>     - cmake --build . --config Release
+
+> Build on **Linux** with gcc (tested with gcc version 9.2.0):
+>  - Commands to build
+>     - cd _bindings_
+>     - Specify the _parallelization_flag_ [-msse3, -mavx, -mfma]:
+>     - g++ -fopenmp _parallelization_flag_ -O3 -Wall -shared -std=c++14 ../code/bindings_forCLI.cpp -o openCOSMORS -I ../eigen -I ../nlohmann
+
+
 #### Running
 > An exemplary file to run the model on python and matlab is included in the bindings folder.
 

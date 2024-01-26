@@ -7,3 +7,4 @@ bindings/openCOSMORS.mex*
 bindings/openCOSMORS.cpython*
 bindings/.vscode/*
 build/*
+*.json

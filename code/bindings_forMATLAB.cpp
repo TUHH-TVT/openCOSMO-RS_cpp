@@ -302,6 +302,19 @@ public:
 		param.comb_SGG_lambda = getNumericFieldValue<double>(matlabStructArrayPar, 0, "comb_SGG_lambda");
 		param.comb_SGG_beta = getNumericFieldValue<double>(matlabStructArrayPar, 0, "comb_SGG_beta");
 
+		param.dGsolv_eta = getNumericFieldValue<double>(matlabStructArrayPar, 0, "dGsolv_eta");
+		param.dGsolv_omega_ring = getNumericFieldValue<double>(matlabStructArrayPar, 0, "dGsolv_omega_ring");
+
+		TypedArray<double> matlabArraydGsolvTau = matlabStructArrayPar[0]["dGsolv_tau"];
+		for (int i = 0; i < param.dGsolv_tau.size(); i++) {
+
+			double val = matlabArraydGsolvTau[i];
+
+			if (!std::isnan(val)) {
+				param.dGsolv_tau[i + 1] = val; // change from zero based index to AN
+			}
+		}
+
 		TypedArray<double> matlabArrayRadii = matlabStructArrayPar[0]["radii"];
 		for (int i = 0; i < param.R_i.size(); i++) {
 
@@ -505,7 +518,7 @@ public:
 					}
 					newCalculation.referenceStateCalculationIndices.push_back(thisReferenceStateCalculationIndices);
 				}
-				else if (referenceStateType == 3) { // COSMO
+				else if (referenceStateType == 3 || referenceStateType == 4) { // COSMO or COSMO for solvation energy calculation
 
 					if (matlabArrayReferenceStateConcentrations.getNumberOfElements() != 0) {
 						std::runtime_error("A reference state concentration was specified for a calculation with reference state COSMO, this does not make sense.");
@@ -555,6 +568,17 @@ public:
 				newCalculation.lnGammaTotal_data.data(),
 				int(newCalculation.originalNumberOfCalculations),
 				int(newCalculation.components.size()));
+
+			newCalculation.dGsolv_data = Eigen::MatrixXf(
+				int(newCalculation.originalNumberOfCalculations),
+				1);
+
+			newCalculation.dGsolv_data.setZero();
+
+			new (&newCalculation.dGsolv) Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>>(
+				newCalculation.dGsolv_data.data(),
+				int(newCalculation.originalNumberOfCalculations),
+				1);
 
 			if (param.sw_calculateContactStatisticsAndAdditionalProperties > 0) {
 

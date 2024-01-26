@@ -49,38 +49,39 @@ void apply_vector_permutation_in_place(std::vector<T>& vec, const std::vector<in
 struct parameters {
 
     /* General switches */
-    int sw_misfit;              /* switch: "0" to use misfit contribution without accounting for sigma correlation. 
+    int sw_misfit = 2;              /* switch: "0" to use misfit contribution without accounting for sigma correlation. 
                                            "1" to account for sigma correlation in misfit contribution 
 										   "2" to account for sigma correlation in misfit contribution except for ions */
 
-	int sw_useSegmentReferenceStateForInteractionMatrix;		/* switch: "0" Set segment reference state to pure segment (COSMO-RS default) (segment reference state cancels if molecular refstate calculated)
+	int sw_useSegmentReferenceStateForInteractionMatrix = 0;		/* switch: "0" Set segment reference state to pure segment (COSMO-RS default) (segment reference state cancels if molecular refstate calculated)
 																	   "1" Set segment reference state to conductor (segment reference state cancels if molecular refstate calculated) */
 
-   	int sw_combTerm;            /* switch:  "0" No combinatorial term
+   	int sw_combTerm = 1;            /* switch:  "0" No combinatorial term
 											"1" to use the combinatorial term by Staverman-Guggenheim
 											"2" to use the combinatorial term by Klamt (2003)
 											"3" to use modified Staverman-Guggenheim combinatorial term with exponential scaling */
 
-	int sw_atomicNumber; // whether or not to use the atomic number as descriptor
+	int sw_atomicNumber = 1; // whether or not to use the atomic number as descriptor
 
-	int sw_differentiateHydrogens;
-	int sw_differentiateMoleculeGroups;
+	int sw_differentiateHydrogens = 0;
+	int sw_differentiateMoleculeGroups = 0;
 
-	std::string sw_COSMOfiles_type; // Type of COSMOfile used, this is used to know which function to use to load the sigma profile. e.g. Turbomole
+	std::string sw_COSMOfiles_type = "ORCA_COSMO_TZVPD"; // Type of COSMOfile used, this is used to know which function to use to load the sigma profile. e.g. Turbomole
 
-	int sw_calculateContactStatisticsAndAdditionalProperties;		/* switch:  "0" Do not calculate contact statistics
+	int sw_calculateContactStatisticsAndAdditionalProperties = 0;		/* switch:  "0" Do not calculate contact statistics
 																				"1" Calculate contact statistics 
 																				"2" Calculate contact statistics, partial molar properties and average surface energies*/
 	int numberOfPartialInteractionMatrices;
 
-	int sw_alwaysReloadSigmaProfiles;
+	int sw_alwaysReloadSigmaProfiles = 0;
 
-	int sw_reloadConcentrations;
+	int sw_reloadConcentrations = 0;
+	int sw_reloadReferenceConcentrations = 0;
 
-	int sw_alwaysCalculateSizeRelatedParameters;	/* switch: "0" combinatorial term and segment fraction is only calculated once at first execution
+	int sw_alwaysCalculateSizeRelatedParameters = 0;	/* switch: "0" combinatorial term and segment fraction is only calculated once at first execution
 															   "1" combinatorial term and segment fraction  is calculated on every iteration */
 
-	int sw_skip_COSMOSPACE_errors;	/* switch: "0" if COSMOSPACE does not converge, it stops execution showing DEBUG information
+	int sw_skip_COSMOSPACE_errors = 0;	/* switch: "0" if COSMOSPACE does not converge, it stops execution showing DEBUG information
 											   "1" if COSMOSPACE does not converge, execution continues setting the objective function very high */
     /* COSMO-RS MODEL PARAMETERS */
     /* General parameters */
@@ -101,6 +102,14 @@ struct parameters {
 	double comb_lambda0;			/* lambda paramters used in the calculation of the combinatorial contribuation from Klamt or Frank & Hannebauer */
 	double comb_lambda1;
 	double comb_lambda2;
+
+	/* Parameters used for solvation energy calculation */
+	double dGsolv_eta;
+	double dGsolv_omega_ring;
+	std::vector<double> dGsolv_tau = std::vector<double>(118, 0.0);
+	std::vector<double> dGsolv_E_gas;
+	std::vector<int> dGsolv_numberOfAtomsInRing;
+	std::vector<double> dGsolv_molarVolume;
 
     /* Radii used for cosmo segment scaling for monoatomic ions */
 	std::vector<double> R_i = std::vector<double>(118, 0.0);                       /* new radii, element specific (r_i[AN]) from the input file*/
@@ -290,9 +299,12 @@ struct molecule {
 	}
 
 	std::string name;
+	std::string qmMethod;
 
 	double Area;
 	double Volume;
+	double epsilonInfinityTotalEnergy;
+	double molarVolumeAt25C;
 
 	signed char moleculeCharge;
 	unsigned short moleculeGroup;
@@ -313,7 +325,7 @@ struct molecule {
 	Eigen::VectorXd atomRadii;
 	Eigen::VectorXi atomAtomicNumbers;
 
-	// Segment information directly from the COSMO file
+	// Segment information directly from the input file
 	Eigen::MatrixXd segmentPositions;
 	Eigen::VectorXi segmentAtomIndices;
 	Eigen::VectorXi segmentAtomicNumber;
@@ -351,7 +363,8 @@ struct calculation {
 		partialMolarEnergies(NULL, 0, 0, 0), \
 		lnGammaCombinatorial(NULL, 0,0), \
 		lnGammaResidual(NULL, 0, 0), \
-		lnGammaTotal(NULL, 0, 0)
+		lnGammaTotal(NULL, 0, 0), \
+		dGsolv(NULL, 0, 0)
 	
 	{
 		segments = segmentTypeCollection(numberOfMolecules);
@@ -372,16 +385,18 @@ struct calculation {
 	Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> lnGammaCombinatorial;
 	Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> lnGammaResidual;
 	Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> lnGammaTotal;
+	Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> dGsolv;
 
 	Eigen::TensorMap<Eigen::Tensor<float, 3, Eigen::RowMajor>> contactStatistics;
 	Eigen::TensorMap<Eigen::Tensor<float, 4, Eigen::RowMajor>> averageSurfaceEnergies;
 	Eigen::TensorMap<Eigen::Tensor<float, 3, Eigen::RowMajor>> partialMolarEnergies;
 
 	// the following matrices are to save the computations temporarily if needed
-	// only for internal use with MATLAB. Access is thorugh the respective maps above.
+	// for internal use. Access is through the respective maps above.
 	Eigen::MatrixXf lnGammaCombinatorial_data;
 	Eigen::MatrixXf lnGammaResidual_data;
 	Eigen::MatrixXf lnGammaTotal_data;
+	Eigen::MatrixXf dGsolv_data;
 
 	Eigen::Tensor<float, 3, Eigen::RowMajor> contactStatistics_data;
 	Eigen::Tensor<float, 4, Eigen::RowMajor> averageSurfaceEnergies_data;

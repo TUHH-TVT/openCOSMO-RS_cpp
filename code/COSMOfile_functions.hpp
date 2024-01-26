@@ -109,6 +109,10 @@ molecule getMoleculeFromTurbomoleCOSMOfile(std::string& path) {
 
     molecule newMolecule;
 
+    std::getline(cosmoFile, currentLine);
+    std::getline(cosmoFile, currentLine);
+    newMolecule.qmMethod = replace(trim(currentLine), "prog.: ", "");
+
     while (std::getline(cosmoFile, currentLine))
     {
         currentLine = trim(currentLine);
@@ -139,6 +143,11 @@ molecule getMoleculeFromTurbomoleCOSMOfile(std::string& path) {
                 currentLine = replace(trim(currentLine), " ", "");
                 parse_line(currentLine, " %*[^=]=%lf", &(newMolecule.Volume));
                 newMolecule.Volume = pow(0.529177249, 3) * newMolecule.Volume;
+            }
+
+            if (startsWith(currentLine, "Total energy + OC corr.")) {
+                currentLine = replace(trim(currentLine), " ", "");
+                parse_line(currentLine, " %*[^=]=%lf", &(newMolecule.epsilonInfinityTotalEnergy));
             }
         }
 
@@ -202,6 +211,7 @@ molecule getMoleculeFromTurbomoleCOSMOfile(std::string& path) {
 
     return newMolecule;
 }
+
 molecule getMoleculeFromORCACOSMOfile(std::string& path) {
 
     std::ifstream cosmoFile(path);
@@ -227,6 +237,16 @@ molecule getMoleculeFromORCACOSMOfile(std::string& path) {
     std::vector<double> segmentSigmas;
 
     molecule newMolecule;
+
+    std::getline(cosmoFile, currentLine);
+
+    std::vector<std::string> parts = split(currentLine, ':');
+    newMolecule.qmMethod = replace(trim(parts[1]), "COSMO", "CPCM");
+
+    scan_for(cosmoFile, "#ENERGY");
+    std::getline(cosmoFile, currentLine);
+    currentLine = trim(replace(currentLine, "FINAL SINGLE POINT ENERGY", ""));
+    newMolecule.epsilonInfinityTotalEnergy = std::stod(currentLine);
 
     scan_for(cosmoFile, "#XYZ_FILE");
 
@@ -297,6 +317,30 @@ molecule getMoleculeFromORCACOSMOfile(std::string& path) {
         }
     }
 
+    std::string matchingLine = scan_for(cosmoFile, "#COSMO_corrected", "start", 3, false);
+    if (matchingLine != "") {
+        int segmentIndex = 0;
+        while (std::getline(cosmoFile, currentLine)) {
+
+            currentLine = trim(currentLine);
+
+            if (currentLine == "##################################################")
+                break;
+
+            if (currentLine != "") {
+
+                double correctedSegmentCharge;
+                parse_line(currentLine, "%lf", &correctedSegmentCharge);
+
+                segmentSigmas[segmentIndex] = correctedSegmentCharge / segmentAreas[segmentIndex];
+                segmentIndex += 1;
+            }
+        }
+
+        if (segmentIndex != segmentSigmas.size()) {
+            throw std::runtime_error("Not enough corrected charges where found parsing the following file: " + path);
+        }
+    }
     cosmoFile.close();
 
     newMolecule.atomPositions = Eigen::MatrixXd::Zero(atomPositions_X.size(), 3);

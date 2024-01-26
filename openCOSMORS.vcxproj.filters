@@ -44,6 +44,9 @@
     <ClCompile Include="code\bindings_forMATLAB.cpp">
       <Filter>Quelldateien</Filter>
     </ClCompile>
+    <ClCompile Include="code\bindings_forCLI.cpp">
+      <Filter>Quelldateien</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <None Include="bindings\compile_mex.m">

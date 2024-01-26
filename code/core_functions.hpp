@@ -197,6 +197,39 @@ void averageAndClusterSegments(parameters& param, molecule& _molecule, int appro
             averagedSigmaCorrs(segmentIndexI) = averagedSigmaCorrs(segmentIndexI) / runningTotalSigmaCorrs;
     }
 
+    bool calculateMolVolumeAt25C = param.dGsolv_E_gas.size() > 0;
+    if (calculateMolVolumeAt25C){
+
+        if (_molecule.qmMethod != "DFT_CPCM_BP86_def2-TZVP+def2-TZVPD_SP")
+            throw std::runtime_error("The QSPR model for the molar volume only works for the quantum chemistry method DFT_CPCM_BP86_def2-TZVP+def2-TZVPD_SP");
+
+        int numberOfSiAtoms = 0;
+        int numberOfHAtoms = 0;
+        int numberOfOAtoms = 0;
+        for (int i = 0; i < numberOfAtoms; i++)
+            if (_molecule.atomAtomicNumbers[i] == 14)
+                numberOfSiAtoms += 1;
+            else if (_molecule.atomAtomicNumbers[i] == 1 || _molecule.atomAtomicNumbers[i] > 100)
+                numberOfHAtoms += 1;
+            else if (_molecule.atomAtomicNumbers[i] == 8)
+                numberOfOAtoms += 1;
+
+        if (numberOfAtoms == 3 && numberOfHAtoms == 2 && numberOfOAtoms == 1){
+            _molecule.molarVolumeAt25C = 18.06863632;
+        } else {
+
+        double second_sigma_moment = (averagedSigmas.array() * averagedSigmas.array() * _molecule.segmentAreas.array()).sum() * 10000;
+
+        _molecule.molarVolumeAt25C = 0.20613621 * _molecule.Volume \
+                                    + 1.30707663 * numberOfAtoms   \
+                                    + 0.43545308 * _molecule.Area  \
+                                    - 0.30871793 * second_sigma_moment \
+                                    + 9.87273752 * numberOfSiAtoms     \
+                                    + 3.28205299;
+        }
+        // display(std::to_string(_molecule.molarVolumeAt25C) + "\n");
+    }
+
     // determine the hydrogen bonding type based on the atomic number
 
     for (int i = 0; i < numberOfSegments; i++) {
@@ -764,7 +797,7 @@ void calculateLnGammaCombinatorial(parameters& param, calculation& _calculation)
             _calculation.lnGammaCombinatorial(h, j) = float(multiplier * lnGamaForCalculations(i, j));
 
             // only subtract reference state value if reference state type is not COSMO
-            if (_calculation.referenceStateType[h] != 3) {
+            if (_calculation.referenceStateType[h] != 3 && _calculation.referenceStateType[h] != 4) {
                 int indexOfReferenceStateCalculation = _calculation.actualConcentrationIndices[_calculation.referenceStateCalculationIndices[h][j]];
 
                 _calculation.lnGammaCombinatorial(h, j) -= float(lnGamaForCalculations(indexOfReferenceStateCalculation, j));
@@ -1136,7 +1169,7 @@ void calculateLnGammaResidual(parameters& param, calculation& _calculation) {
             }
 
             // only subtract reference state value if reference state type is not COSMO
-            if (_calculation.referenceStateType[h] != 3) {
+            if (_calculation.referenceStateType[h] != 3 && _calculation.referenceStateType[h] != 4) {
                 int indexOfReferenceStateCalculation = _calculation.actualConcentrationIndices[_calculation.referenceStateCalculationIndices[h][j]];
 
                 _calculation.lnGammaResidual(h, j) -= temporary_lnGammaMolecule(indexOfReferenceStateCalculation, j);
@@ -1207,7 +1240,7 @@ void calculate(std::vector<int>& calculationIndices) {
 
 
             if (param.sw_alwaysCalculateSizeRelatedParameters == 1 || (param.sw_alwaysCalculateSizeRelatedParameters == 0 && n_ex == 3) \
-                || (param.sw_alwaysReloadSigmaProfiles == 1 && n_ex > 3) || param.sw_reloadConcentrations == 1) {
+                || (param.sw_alwaysReloadSigmaProfiles == 1 && n_ex > 3) || param.sw_reloadConcentrations == 1 || param.sw_reloadReferenceConcentrations == 1) {
 
                 rescaleSegments(param, calculations[calculationIndex]);
                 calculateSegmentConcentrations(calculations[calculationIndex]);
@@ -1224,7 +1257,7 @@ void calculate(std::vector<int>& calculationIndices) {
             std::chrono::high_resolution_clock::time_point calculateCombinatorial_last = std::chrono::high_resolution_clock::now();
 #endif
             // recalculate combinatorial term if needed
-            if ((param.sw_alwaysCalculateSizeRelatedParameters == 0 && n_ex == 3) || param.sw_alwaysCalculateSizeRelatedParameters == 1) {
+            if ((param.sw_alwaysCalculateSizeRelatedParameters == 0 && n_ex == 3) || param.sw_alwaysCalculateSizeRelatedParameters == 1 || param.sw_reloadConcentrations == 1 || param.sw_reloadReferenceConcentrations == 1) {
                 calculateLnGammaCombinatorial(param, calculations[calculationIndex]);;
             }
 
@@ -1241,6 +1274,47 @@ void calculate(std::vector<int>& calculationIndices) {
 #endif
 
             calculations[calculationIndex].lnGammaTotal = calculations[calculationIndex].lnGammaCombinatorial + calculations[calculationIndex].lnGammaResidual;
+            
+            double kcalPerMol_per_Hartree = 2625.499639479/4.184;
+            double reference_pressure = 101325; // Pa = 1 atm;
+            for (int i_concentration = 0; i_concentration < calculations[calculationIndex].originalNumberOfCalculations; i_concentration++) {
+                if (calculations[calculationIndex].referenceStateType[i_concentration] == 4) {
+                    for (int i_component = 0; i_component < calculations[calculationIndex].components.size(); i_component++) {
+                        double dGsolv = NULL;
+                        if (calculations[calculationIndex].concentrations[i_concentration][i_component] == 0.0f) {
+
+                            double RT = R_GAS_CONSTANT * calculations[calculationIndex].temperatures[i_concentration];
+                            double molar_volume_ideal_gas = RT / reference_pressure;
+                            double RT_kcalPerMol = RT / (1000 * 4.184);
+
+                            // all energies calculated below this line are in kcal/mol
+                            double E_vdw = 0.0;
+                            segmentTypeCollection segments = calculations[calculationIndex].components[i_component]->segments;
+                            std::unordered_map<int, double> areasByAtomicNumber;
+                            for (int i_segment = 0; i_segment < segments.size(); i_segment++) {
+                                int AN = segments.SegmentTypeAtomicNumber[i_segment];
+
+                                if (areasByAtomicNumber.find(AN) == areasByAtomicNumber.end())
+                                    areasByAtomicNumber[AN] = 0.0;
+
+                                areasByAtomicNumber[AN] += segments.SegmentTypeAreas[i_segment][0];
+                            }
+
+                            for (auto& it : areasByAtomicNumber) {
+                                E_vdw += param.dGsolv_tau[it.first] * it.second;
+                            }
+                            double referenceStateCorrection = RT_kcalPerMol * log(molar_volume_ideal_gas / param.dGsolv_molarVolume[i_component]);
+
+                            double E_diel = (calculations[calculationIndex].components[i_component]->epsilonInfinityTotalEnergy - param.dGsolv_E_gas[i_component]) * kcalPerMol_per_Hartree;
+                            double mu_liquid = RT_kcalPerMol * calculations[calculationIndex].lnGammaTotal(i_concentration, i_component);
+                            double E_ring = param.dGsolv_omega_ring * param.dGsolv_numberOfAtomsInRing[i_component];
+                            dGsolv = E_diel + mu_liquid - E_vdw - E_ring - referenceStateCorrection - param.dGsolv_eta;
+                        }
+
+                        calculations[calculationIndex].dGsolv(i_concentration, i_component) = dGsolv;
+                    }
+                }
+            }
 
             });
         }
