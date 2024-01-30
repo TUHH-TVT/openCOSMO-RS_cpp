@@ -73,7 +73,7 @@ This is an open source implementation of the COSMO-RS model that uses multiple d
 >  - Commands to build
 >     - cd _bindings_
 >     - Specify the _parallelization_flag_ [-msse3, -mavx, -mfma]:
->     - g++ -fopenmp _parallelization_flag_ -O3 -Wall -shared -std=c++14 ../code/bindings_forCLI.cpp -o openCOSMORS -I ../eigen -I ../nlohmann
+>     - g++ -fopenmp _parallelization_flag_ -O3 -Wall -std=c++14 ../code/bindings_forCLI.cpp -o openCOSMORS -I ../eigen -I ../nlohmann
 
 
 #### Running
