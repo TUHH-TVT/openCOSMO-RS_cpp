@@ -23,7 +23,7 @@ void initializeOnCLI() {
     display = displayOnCLI;
     displayTime = displayTimeOnCLI;
 
-    initialize(param);
+    initialize(param, false);
     n_ex = 3;
 }
 
@@ -76,10 +76,6 @@ void loadParametersOnCLI(const json& parameters) {
         for (int it : dGsolv_numberOfAtomsInRing)
             param.dGsolv_numberOfAtomsInRing.push_back(it);
 
-        json dGsolv_molarVolume = parameters["dGsolv_molarVolume"];
-        for (double it : dGsolv_molarVolume)
-            param.dGsolv_molarVolume.push_back(it);
-
         json dGsolv_E_gas = parameters["dGsolv_E_gas"];
         for (double it : dGsolv_E_gas)
             param.dGsolv_E_gas.push_back(it);
@@ -106,7 +102,7 @@ void loadMoleculesOnCLI(const json& options, const json& parameters, const json&
 
     if (param.sw_calculateContactStatisticsAndAdditionalProperties != 0) {
         const json& partialInteractionMatrices = options["sw_SR_partialInteractionMatrices"];
-        param.numberOfPartialInteractionMatrices = partialInteractionMatrices.size();
+        param.numberOfPartialInteractionMatrices = int(partialInteractionMatrices.size());
     }
     else {
         param.numberOfPartialInteractionMatrices = 0;
@@ -142,7 +138,7 @@ void loadCalculationsOnCLI(const json& calculationsOnCLI) {
 
         // array of component indices
         const json& componentList = calculationDict["component_indices"];
-        int numberOfComponents = componentList.size();
+        int numberOfComponents = int(componentList.size());
 
         calculation newCalculation(numberOfComponents);
 
@@ -394,13 +390,15 @@ int main(int argc, char** argv)
 {
     try {
 
+        initializeOnCLI();
+        argc = 2;
         std::string inputFilePath;
         std::string outputFilePath;
         if (argc < 2) {
-            throw std::runtime_error("The required input json file path was given.");
+            throw std::runtime_error("The required input json file path was not given.");
         }
         else if (argc == 2 || argc == 3) {
-            inputFilePath = argv[1];
+            inputFilePath = R"(H:\Desktop\github_repos\openCOSMO-RS_cpp\test.json)";// argv[1];
             if (!endsWith(inputFilePath, ".json")) {
                 throw std::runtime_error("The required input json file path has to end in '.json'");
             }
@@ -417,8 +415,6 @@ int main(int argc, char** argv)
         else {
             throw std::runtime_error("The openCOSMO-RS binary accepts two or three input arguments. More were given.");
         }
-       
-        initializeOnCLI();
 
         std::ifstream f(inputFilePath);
         json inputFileData = json::parse(f);
@@ -460,7 +456,9 @@ int main(int argc, char** argv)
 
     }
     catch (const std::exception& e) {
+        display("An error ocurred executing openCOSMO-RS:\n\n");
         display(e.what());
+        display("\n");
         return 1;
     }
 

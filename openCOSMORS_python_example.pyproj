@@ -20,6 +20,9 @@
   <PropertyGroup>
     <VisualStudioVersion Condition=" '$(VisualStudioVersion)' == '' ">10.0</VisualStudioVersion>
   </PropertyGroup>
+  <PropertyGroup Condition=" '$(Configuration)' == 'DebugCLI' ">
+    <OutputPath>bin\DebugCLI\</OutputPath>
+  </PropertyGroup>
   <ItemGroup>
     <Compile Include="run_example.py" />
   </ItemGroup>

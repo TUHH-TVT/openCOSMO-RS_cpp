@@ -282,6 +282,10 @@ molecule getMoleculeFromORCACOSMOfile(std::string& path) {
     parse_line(currentLine, " %lf", &(newMolecule.Area));
     newMolecule.Area = pow(0.529177249, 2) * newMolecule.Area;
 
+    currentLine = scan_for(cosmoFile, "# CPCM dielectric energy", "end");
+    float uncorrectedDialectricEnergy = 0.0;
+    parse_line(currentLine, "%f", &uncorrectedDialectricEnergy);
+
     scan_for(cosmoFile, "# CARTESIAN COORDINATES (A.U.) + RADII (A.U.)", "start", 1);
     for (int i = 0; i < numberOfAtoms; i++) {
         std::getline(cosmoFile, currentLine);
@@ -317,8 +321,20 @@ molecule getMoleculeFromORCACOSMOfile(std::string& path) {
         }
     }
 
-    std::string matchingLine = scan_for(cosmoFile, "#COSMO_corrected", "start", 3, false);
+    std::string matchingLine = scan_for(cosmoFile, "#COSMO_corrected", "start", 0, false);
     if (matchingLine != "") {
+        std::getline(cosmoFile, currentLine);
+        if (!startsWith(currentLine, "Corrected dielectric energy   =")) {
+            throw std::runtime_error("Could not find the corrected dielectric energy entry in the orcacosmo file.");
+        }
+        currentLine = trim(replace(currentLine, "Corrected dielectric energy   =", ""));
+        float correctedDielectricEnergy = 0.0;
+        parse_line(currentLine, "%f", &correctedDielectricEnergy);
+        newMolecule.epsilonInfinityTotalEnergy = newMolecule.epsilonInfinityTotalEnergy - uncorrectedDialectricEnergy + correctedDielectricEnergy;
+
+        std::getline(cosmoFile, currentLine);
+        std::getline(cosmoFile, currentLine);
+
         int segmentIndex = 0;
         while (std::getline(cosmoFile, currentLine)) {
 

@@ -2,6 +2,7 @@
 .vs/*
 bindings/temporary/*
 bindings/Debug/*
+bindings/DebugCLI/*
 bindings/Release/*
 bindings/openCOSMORS.mex*
 bindings/openCOSMORS.cpython*

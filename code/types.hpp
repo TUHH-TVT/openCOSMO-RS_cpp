@@ -109,7 +109,6 @@ struct parameters {
 	std::vector<double> dGsolv_tau = std::vector<double>(118, 0.0);
 	std::vector<double> dGsolv_E_gas;
 	std::vector<int> dGsolv_numberOfAtomsInRing;
-	std::vector<double> dGsolv_molarVolume;
 
     /* Radii used for cosmo segment scaling for monoatomic ions */
 	std::vector<double> R_i = std::vector<double>(118, 0.0);                       /* new radii, element specific (r_i[AN]) from the input file*/

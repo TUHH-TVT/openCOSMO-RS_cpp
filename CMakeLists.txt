@@ -27,7 +27,7 @@ target_include_directories(openCOSMORS PUBLIC ${MY_INCLUDES})
 # please adjust the instruction set to your hardware by specifying one of the following
 # compile flags: __SSE3__, __AVX__, __FMA__
 # if you do not know what your hardware supports you can use the program cpu-z to check
-set_target_properties(openCOSMORS PROPERTIES COMPILE_FLAGS -D__FMA__)
+set_target_properties(openCOSMORS PROPERTIES COMPILE_FLAGS -D__AVX__)
 
 # activate OpenMP for release builds if available
 find_package(OpenMP)

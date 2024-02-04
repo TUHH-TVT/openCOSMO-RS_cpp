@@ -81,7 +81,7 @@ float hsum256_ps_avx(__m256 v) {
 }
 #endif
 
-void initialize(parameters& param) {
+void initialize(parameters& param, bool showBinarySpecs = true) {
 
     n_ex = 0;
     molecules.clear();
@@ -129,7 +129,8 @@ void initialize(parameters& param) {
         param.ChargeRaster.push_back(param.sigmaMin + param.sigmaStep * i);
     }
 
-    display("\nBINARY SPECS\n-------------------------\n" + compilation_mode + "\n" + OPENMP_parallelization + "\n" + vectorization_level + "\n-------------------------\n\n");
+    if (showBinarySpecs)
+        display("\nBINARY SPECS\n-------------------------\n" + compilation_mode + "\n" + OPENMP_parallelization + "\n" + vectorization_level + "\n-------------------------\n\n");
 }
 
 void averageAndClusterSegments(parameters& param, molecule& _molecule, int approximateNumberOfSegmentTypes = 0) {
@@ -333,9 +334,9 @@ molecule loadNewMolecule(parameters& param, std::string componentPath) {
 
     int numberOfAtoms = int(newMolecule.atomAtomicNumbers.size());
 
-    float sumOfScreeningCharge = (newMolecule.segmentAreas.array() * newMolecule.segmentSigmas.array()).matrix().sum();
+    float sumOfScreeningCharge = float((newMolecule.segmentAreas.array() * newMolecule.segmentSigmas.array()).matrix().sum());
 
-    newMolecule.moleculeCharge = std::round(-1.0f * sumOfScreeningCharge);
+    newMolecule.moleculeCharge = (signed char)(std::round(-1.0f * sumOfScreeningCharge));
 
     // Store atomic radii and check for consistency
     for (int atomIndex = 0; atomIndex < numberOfAtoms; atomIndex++) {
@@ -429,7 +430,7 @@ molecule loadNewMolecule(parameters& param, std::string componentPath) {
         throw std::runtime_error("differentiateHydrogens accepts values [0, 1]");
     }
 
-    int numberOfSegments = newMolecule.segmentAreas.size();
+    int numberOfSegments = int(newMolecule.segmentAreas.size());
     newMolecule.segmentAtomicNumber = Eigen::VectorXi(numberOfSegments);
 
     for (int i = 0; i < numberOfSegments; i++) {
@@ -1279,6 +1280,13 @@ void calculate(std::vector<int>& calculationIndices) {
             double reference_pressure = 101325; // Pa = 1 atm;
             for (int i_concentration = 0; i_concentration < calculations[calculationIndex].originalNumberOfCalculations; i_concentration++) {
                 if (calculations[calculationIndex].referenceStateType[i_concentration] == 4) {
+                    int i_solvent_component = -1;
+                    for (int i_component = 0; i_component < calculations[calculationIndex].components.size(); i_component++) {
+                        if (calculations[calculationIndex].concentrations[i_concentration][i_component] == 1.0f) {
+                            i_solvent_component = i_component;
+                            break;
+                        }
+                    }
                     for (int i_component = 0; i_component < calculations[calculationIndex].components.size(); i_component++) {
                         double dGsolv = NULL;
                         if (calculations[calculationIndex].concentrations[i_concentration][i_component] == 0.0f) {
@@ -1301,9 +1309,9 @@ void calculate(std::vector<int>& calculationIndices) {
                             }
 
                             for (auto& it : areasByAtomicNumber) {
-                                E_vdw += param.dGsolv_tau[it.first] * it.second;
+                                E_vdw += abs(param.dGsolv_tau[it.first]) * it.second;
                             }
-                            double referenceStateCorrection = RT_kcalPerMol * log(molar_volume_ideal_gas / param.dGsolv_molarVolume[i_component]);
+                            double referenceStateCorrection = RT_kcalPerMol * log(molar_volume_ideal_gas / (calculations[calculationIndex].components[i_solvent_component]->molarVolumeAt25C / 1E6));
 
                             double E_diel = (calculations[calculationIndex].components[i_component]->epsilonInfinityTotalEnergy - param.dGsolv_E_gas[i_component]) * kcalPerMol_per_Hartree;
                             double mu_liquid = RT_kcalPerMol * calculations[calculationIndex].lnGammaTotal(i_concentration, i_component);
@@ -1311,7 +1319,7 @@ void calculate(std::vector<int>& calculationIndices) {
                             dGsolv = E_diel + mu_liquid - E_vdw - E_ring - referenceStateCorrection - param.dGsolv_eta;
                         }
 
-                        calculations[calculationIndex].dGsolv(i_concentration, i_component) = dGsolv;
+                        calculations[calculationIndex].dGsolv(i_concentration, i_component) = float(dGsolv);
                     }
                 }
             }
