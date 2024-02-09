@@ -391,14 +391,13 @@ int main(int argc, char** argv)
     try {
 
         initializeOnCLI();
-        argc = 2;
         std::string inputFilePath;
         std::string outputFilePath;
         if (argc < 2) {
             throw std::runtime_error("The required input json file path was not given.");
         }
         else if (argc == 2 || argc == 3) {
-            inputFilePath = R"(H:\Desktop\github_repos\openCOSMO-RS_cpp\test.json)";// argv[1];
+            inputFilePath = argv[1];
             if (!endsWith(inputFilePath, ".json")) {
                 throw std::runtime_error("The required input json file path has to end in '.json'");
             }
@@ -417,6 +416,8 @@ int main(int argc, char** argv)
         }
 
         std::ifstream f(inputFilePath);
+        if (!f.good())
+            throw std::runtime_error("The required input json file path was not found. Does it exists? Is the path correct?");
         json inputFileData = json::parse(f);
 
         loadMoleculesOnCLI(inputFileData, inputFileData, inputFileData["componentPaths"]);

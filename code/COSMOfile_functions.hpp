@@ -242,6 +242,7 @@ molecule getMoleculeFromORCACOSMOfile(std::string& path) {
 
     std::vector<std::string> parts = split(currentLine, ':');
     newMolecule.qmMethod = replace(trim(parts[1]), "COSMO", "CPCM");
+    newMolecule.name = trim(parts[0]);
 
     scan_for(cosmoFile, "#ENERGY");
     std::getline(cosmoFile, currentLine);
