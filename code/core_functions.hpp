@@ -198,11 +198,16 @@ void averageAndClusterSegments(parameters& param, molecule& _molecule, int appro
             averagedSigmaCorrs(segmentIndexI) = averagedSigmaCorrs(segmentIndexI) / runningTotalSigmaCorrs;
     }
 
-    bool calculateMolVolumeAt25C = param.dGsolv_E_gas.size() > 0;
-    if (calculateMolVolumeAt25C){
-
-        if (_molecule.qmMethod != "DFT_CPCM_BP86_def2-TZVP+def2-TZVPD_SP")
-            throw std::runtime_error("The QSPR model for the molar volume only works for the quantum chemistry method DFT_CPCM_BP86_def2-TZVP+def2-TZVPD_SP");
+    bool calculateSolvationEnergies = param.dGsolv_E_gas.size() > 0;
+    if (calculateSolvationEnergies){
+        if (_molecule.qmMethod != "DFT_CPCM_BP86_def2-TZVP+def2-TZVPD_SP" && _molecule.qmMethod != "DFT_BP86_def2-TZVPD_SP")
+            if (param.sw_dGsolv_calculation_strict == 1) {
+                throw std::runtime_error("The QSPR model for the molar volume only works for the quantum chemistry method DFT_BP86_def2-TZVPD_SP");
+            }
+            else {
+                warnings.push_back(" - The QSPR model for the molar volume was parametrized using a different quantum chemistry method than the one you are using. Recommended method: DFT_BP86_def2-TZVPD_SP");
+            }
+            
 
         int numberOfSiAtoms = 0;
         int numberOfHAtoms = 0;
@@ -228,7 +233,6 @@ void averageAndClusterSegments(parameters& param, molecule& _molecule, int appro
                                     + 9.87273752 * numberOfSiAtoms     \
                                     + 3.28205299;
         }
-        // display(std::to_string(_molecule.molarVolumeAt25C) + "\n");
     }
 
     // determine the hydrogen bonding type based on the atomic number
@@ -1276,55 +1280,80 @@ void calculate(std::vector<int>& calculationIndices) {
 
             calculations[calculationIndex].lnGammaTotal = calculations[calculationIndex].lnGammaCombinatorial + calculations[calculationIndex].lnGammaResidual;
             
-            double kcalPerMol_per_Hartree = 2625.499639479/4.184;
-            double reference_pressure = 101325; // Pa = 1 atm;
-            for (int i_concentration = 0; i_concentration < calculations[calculationIndex].originalNumberOfCalculations; i_concentration++) {
-                if (calculations[calculationIndex].referenceStateType[i_concentration] == 4) {
-                    int i_solvent_component = -1;
-                    for (int i_component = 0; i_component < calculations[calculationIndex].components.size(); i_component++) {
-                        if (calculations[calculationIndex].concentrations[i_concentration][i_component] == 1.0f) {
-                            i_solvent_component = i_component;
-                            break;
+            bool calculateSolvationEnergies = param.dGsolv_E_gas.size() > 0;
+            if (calculateSolvationEnergies){
+                double kcalPerMol_per_Hartree = 2625.499639479/4.184;
+                double reference_pressure = 101325; // Pa = 1 atm;
+                std::vector<int> atomicNumbersWithout_dGsolv_tau = std::vector<int>();
+                double approximate_dGsolv_tau = 0.0262; // median of other values
+                for (int i_concentration = 0; i_concentration < calculations[calculationIndex].originalNumberOfCalculations; i_concentration++) {
+                    if (calculations[calculationIndex].referenceStateType[i_concentration] == 4) {
+                        int i_solvent_component = -1;
+                        for (int i_component = 0; i_component < calculations[calculationIndex].components.size(); i_component++) {
+                            if (calculations[calculationIndex].concentrations[i_concentration][i_component] == 1.0f) {
+                                i_solvent_component = i_component;
+                                break;
+                            }
                         }
-                    }
-                    for (int i_component = 0; i_component < calculations[calculationIndex].components.size(); i_component++) {
-                        double dGsolv = NULL;
-                        if (calculations[calculationIndex].concentrations[i_concentration][i_component] == 0.0f) {
+                        for (int i_component = 0; i_component < calculations[calculationIndex].components.size(); i_component++) {
+                            double dGsolv = NULL;
+                            if (calculations[calculationIndex].concentrations[i_concentration][i_component] == 0.0f) {
 
-                            double RT = R_GAS_CONSTANT * calculations[calculationIndex].temperatures[i_concentration];
-                            double molar_volume_ideal_gas = RT / reference_pressure;
-                            double RT_kcalPerMol = RT / (1000 * 4.184);
+                                double RT = R_GAS_CONSTANT * calculations[calculationIndex].temperatures[i_concentration];
+                                double molar_volume_ideal_gas = RT / reference_pressure;
+                                double RT_kcalPerMol = RT / (1000 * 4.184);
 
-                            // all energies calculated below this line are in kcal/mol
-                            double E_vdw = 0.0;
-                            segmentTypeCollection segments = calculations[calculationIndex].components[i_component]->segments;
-                            std::unordered_map<int, double> areasByAtomicNumber;
-                            for (int i_segment = 0; i_segment < segments.size(); i_segment++) {
-                                int AN = segments.SegmentTypeAtomicNumber[i_segment];
+                                // all energies calculated below this line are in kcal/mol
+                                double E_vdw = 0.0;
+                                segmentTypeCollection segments = calculations[calculationIndex].components[i_component]->segments;
+                                std::unordered_map<int, double> areasByAtomicNumber;
+                                for (int i_segment = 0; i_segment < segments.size(); i_segment++) {
+                                    int AN = segments.SegmentTypeAtomicNumber[i_segment];
 
-                                if (areasByAtomicNumber.find(AN) == areasByAtomicNumber.end())
-                                    areasByAtomicNumber[AN] = 0.0;
+                                    if (areasByAtomicNumber.find(AN) == areasByAtomicNumber.end())
+                                        areasByAtomicNumber[AN] = 0.0;
 
-                                areasByAtomicNumber[AN] += segments.SegmentTypeAreas[i_segment][0];
+                                    areasByAtomicNumber[AN] += segments.SegmentTypeAreas[i_segment][0];
+                                }
+
+                                for (auto& it : areasByAtomicNumber) {
+                                    double this_atom_dGsolv_tau = abs(param.dGsolv_tau[it.first]);
+                                    if (this_atom_dGsolv_tau == 0.0) {
+                                        this_atom_dGsolv_tau = approximate_dGsolv_tau;
+                                        atomicNumbersWithout_dGsolv_tau.push_back(it.first);
+                                    }
+                                    
+                                    E_vdw += this_atom_dGsolv_tau * it.second;
+                                }
+                                double referenceStateCorrection = RT_kcalPerMol * log(molar_volume_ideal_gas / (calculations[calculationIndex].components[i_solvent_component]->molarVolumeAt25C / 1E6));
+
+                                double E_diel = (calculations[calculationIndex].components[i_component]->epsilonInfinityTotalEnergy - param.dGsolv_E_gas[i_component]) * kcalPerMol_per_Hartree;
+                                double mu_liquid = RT_kcalPerMol * calculations[calculationIndex].lnGammaTotal(i_concentration, i_component);
+                                double E_ring = param.dGsolv_omega_ring * param.dGsolv_numberOfAtomsInRing[i_component];
+                                dGsolv = E_diel + mu_liquid - E_vdw - E_ring - referenceStateCorrection - param.dGsolv_eta;
                             }
 
-                            for (auto& it : areasByAtomicNumber) {
-                                E_vdw += abs(param.dGsolv_tau[it.first]) * it.second;
-                            }
-                            double referenceStateCorrection = RT_kcalPerMol * log(molar_volume_ideal_gas / (calculations[calculationIndex].components[i_solvent_component]->molarVolumeAt25C / 1E6));
-
-                            double E_diel = (calculations[calculationIndex].components[i_component]->epsilonInfinityTotalEnergy - param.dGsolv_E_gas[i_component]) * kcalPerMol_per_Hartree;
-                            double mu_liquid = RT_kcalPerMol * calculations[calculationIndex].lnGammaTotal(i_concentration, i_component);
-                            double E_ring = param.dGsolv_omega_ring * param.dGsolv_numberOfAtomsInRing[i_component];
-                            dGsolv = E_diel + mu_liquid - E_vdw - E_ring - referenceStateCorrection - param.dGsolv_eta;
+                            calculations[calculationIndex].dGsolv(i_concentration, i_component) = float(dGsolv);
                         }
-
-                        calculations[calculationIndex].dGsolv(i_concentration, i_component) = float(dGsolv);
                     }
                 }
-            }
+                if (atomicNumbersWithout_dGsolv_tau.size() > 0) {
+                    sort(atomicNumbersWithout_dGsolv_tau.begin(), atomicNumbersWithout_dGsolv_tau.end());
+                    atomicNumbersWithout_dGsolv_tau.erase(unique(atomicNumbersWithout_dGsolv_tau.begin(), atomicNumbersWithout_dGsolv_tau.end()), atomicNumbersWithout_dGsolv_tau.end());
+                    std::string ANs = "";
+                    for (int i_AN = 0; i_AN < atomicNumbersWithout_dGsolv_tau.size(); i_AN++) {
+                        ANs += std::to_string(atomicNumbersWithout_dGsolv_tau[i_AN]) + ";";
+                    }
+                    if (param.sw_dGsolv_calculation_strict == 1) {
+                        throw std::runtime_error("For the following atomic numbers not all parameters are available for the calculation of solvation energies: " + ANs);
+                    }
+                    else {
+                        warnings.push_back(" - For the following atomic numbers not all parameters are available for the calculation of solvation energies, an estimate was used: " + ANs);
+                    }
 
-            });
-        }
-    e.rethrow();
+                }
+            }
+        });
     }
+    e.rethrow();
+}

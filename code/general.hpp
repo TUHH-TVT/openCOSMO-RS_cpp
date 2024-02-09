@@ -68,6 +68,7 @@ std::string vectorization_level = "vectorization: SSE3";
 
 std::vector<std::shared_ptr<molecule>> molecules;
 std::vector<calculation> calculations;
+std::vector<std::string> warnings;
 
 parameters param;
 int n_ex = -1;

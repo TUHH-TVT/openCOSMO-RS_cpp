@@ -24,6 +24,8 @@ void initializeOnCLI() {
     displayTime = displayTimeOnCLI;
 
     initialize(param, false);
+    param.sw_dGsolv_calculation_strict = 0;
+    warnings = std::vector<std::string>();
     n_ex = 3;
 }
 
@@ -416,7 +418,7 @@ int main(int argc, char** argv)
         }
 
         std::ifstream f(inputFilePath);
-        if (!f.good())
+        if (f.fail())
             throw std::runtime_error("The required input json file path was not found. Does it exists? Is the path correct?");
         json inputFileData = json::parse(f);
 
@@ -433,6 +435,18 @@ int main(int argc, char** argv)
 
         inputFileData["ln_gammas"] = json::array();
         inputFileData["dGsolv"] = json::array();
+
+        if (warnings.size() > 0) {
+            display("\nWARNINGS: \n");
+            warnings.insert(warnings.begin(), "Some issues may lead to the calculated solvation energies having larger deviations than originally reported:");
+
+            for (int i_warning = 0; i_warning < warnings.size(); i_warning++) {
+                display(warnings[i_warning] + "\n");
+            }
+            display("\n");
+        }
+        inputFileData["warnings"] = warnings;
+
         for (int calculationIndex = 0; calculationIndex < inputFileData["calculations"].size(); calculationIndex++) {
             json dGsolv_thisCalculation;
             for (int i = 0; i < calculations[calculationIndex].lnGammaTotal.rows(); i++) {
@@ -450,6 +464,7 @@ int main(int argc, char** argv)
             }
             inputFileData["dGsolv"].push_back(dGsolv_thisCalculation);
         }
+        inputFileData.erase("dGsolv_E_gas");
 
 
         std::ofstream o(outputFilePath);

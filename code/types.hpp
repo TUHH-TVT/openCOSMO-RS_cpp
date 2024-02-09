@@ -83,6 +83,9 @@ struct parameters {
 
 	int sw_skip_COSMOSPACE_errors = 0;	/* switch: "0" if COSMOSPACE does not converge, it stops execution showing DEBUG information
 											   "1" if COSMOSPACE does not converge, execution continues setting the objective function very high */
+
+	int sw_dGsolv_calculation_strict = 1; // 0Allows calculation of solvation free energies also for atoms that have not been parameterized, but gives a warning
+										  // 1: Allows calculation of solvation free energies if all parameters are available
     /* COSMO-RS MODEL PARAMETERS */
     /* General parameters */
     double Aeff;                    /* area of effective thermodynamic contact  [Angstrom^2] */
