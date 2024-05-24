@@ -433,8 +433,8 @@ int main(int argc, char** argv)
 
         calculate(calculationIndices);
 
-        inputFileData["ln_gammas"] = json::array();
-        inputFileData["dGsolv"] = json::array();
+        json outputJson = json::object();
+        outputJson["dGsolv"] = json::array();
 
         if (warnings.size() > 0) {
             display("\nWARNINGS: \n");
@@ -445,30 +445,25 @@ int main(int argc, char** argv)
             }
             display("\n");
         }
-        inputFileData["warnings"] = warnings;
+        outputJson["warnings"] = warnings;
 
         for (int calculationIndex = 0; calculationIndex < inputFileData["calculations"].size(); calculationIndex++) {
             json dGsolv_thisCalculation;
             for (int i = 0; i < calculations[calculationIndex].lnGammaTotal.rows(); i++) {
-                std::vector<float> lnGammaTotal;
                 std::vector<float> dGsolv;
                 for (int j = 0; j < calculations[calculationIndex].lnGammaTotal.cols(); j++) {
-                    lnGammaTotal.push_back(calculations[calculationIndex].lnGammaTotal(i, j));
                     dGsolv.push_back(calculations[calculationIndex].dGsolv(i, j));
                 }
-                json lnGammaTotal_vec(lnGammaTotal);
-                inputFileData["ln_gammas"].push_back(lnGammaTotal_vec);
                 json dGsolv_vec(dGsolv);
                 dGsolv_thisCalculation.push_back(dGsolv_vec);
                 
             }
-            inputFileData["dGsolv"].push_back(dGsolv_thisCalculation);
+            outputJson["dGsolv"].push_back(dGsolv_thisCalculation);
         }
-        inputFileData.erase("dGsolv_E_gas");
 
 
         std::ofstream o(outputFilePath);
-        o << std::setw(4) << inputFileData << std::endl;
+        o << std::setw(4) << outputJson << std::endl;
 
     }
     catch (const std::exception& e) {
