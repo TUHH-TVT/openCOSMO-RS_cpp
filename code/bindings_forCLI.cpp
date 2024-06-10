@@ -109,7 +109,7 @@ void loadMoleculesOnCLI(const json& options, const json& parameters, const json&
     else {
         param.numberOfPartialInteractionMatrices = 0;
     }
-    if (param.sw_misfit < 0 && param.sw_misfit > 2) {
+    if (param.sw_misfit < 0 || param.sw_misfit > 2) {
         throw std::runtime_error("sw_SR_misfit should have one of the following values: [0, 1, 2].");
     }
 
@@ -380,7 +380,7 @@ void loadCalculationsOnCLI(const json& calculationsOnCLI) {
         }
 
         newCalculation.number = (int)i;
-        finishCalculationInitiation(newCalculation, param);
+        finishCalculationInitiation(newCalculation);
         // the following std::move statement is very important as otherwise the Eigen::Map
         // are pointing to matrices deleted after exiting this function
         calculations.push_back(std::move(newCalculation));

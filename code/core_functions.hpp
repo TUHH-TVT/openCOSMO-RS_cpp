@@ -200,25 +200,26 @@ void averageAndClusterSegments(parameters& param, molecule& _molecule, int appro
 
     bool calculateSolvationEnergies = param.dGsolv_E_gas.size() > 0;
     if (calculateSolvationEnergies){
-        if (_molecule.qmMethod != "DFT_CPCM_BP86_def2-TZVP+def2-TZVPD_SP" && _molecule.qmMethod != "DFT_BP86_def2-TZVPD_SP")
+        if (_molecule.qmMethod != "DFT_CPCM_BP86_def2-TZVP+def2-TZVPD_SP" && _molecule.qmMethod != "DFT_BP86_def2-TZVPD_SP"){
             if (param.sw_dGsolv_calculation_strict == 1) {
                 throw std::runtime_error("The QSPR model for the molar volume only works for the quantum chemistry method DFT_BP86_def2-TZVPD_SP");
             }
             else {
                 warnings.push_back(" - The QSPR model for the molar volume was parametrized using a different quantum chemistry method than the one you are using. Recommended method: DFT_BP86_def2-TZVPD_SP");
             }
-            
+        }
 
         int numberOfSiAtoms = 0;
         int numberOfHAtoms = 0;
         int numberOfOAtoms = 0;
-        for (int i = 0; i < numberOfAtoms; i++)
+        for (int i = 0; i < numberOfAtoms; i++){
             if (_molecule.atomAtomicNumbers[i] == 14)
                 numberOfSiAtoms += 1;
             else if (_molecule.atomAtomicNumbers[i] == 1 || _molecule.atomAtomicNumbers[i] > 100)
                 numberOfHAtoms += 1;
             else if (_molecule.atomAtomicNumbers[i] == 8)
                 numberOfOAtoms += 1;
+        }
 
         if (numberOfAtoms == 3 && numberOfHAtoms == 2 && numberOfOAtoms == 1){
             _molecule.molarVolumeAt25C = 18.06863632;
@@ -604,7 +605,7 @@ void calculateSegmentConcentrations(calculation& _calculation) {
     }
 }
 
-void finishCalculationInitiation(calculation& _calculation, parameters& param) {
+void finishCalculationInitiation(calculation& _calculation) {
 
     if (_calculation.concentrations.size() > 65535) {
         throw std::runtime_error("Too many calculations, other datatype would be necessary for newCalculation.referenceStates to cope with this amount. (unsigned short used so far allowing for up to 65535)");
@@ -1300,7 +1301,7 @@ void calculate(std::vector<int>& calculationIndices) {
                             }
                         }
                         for (int i_component = 0; i_component < calculations[calculationIndex].components.size(); i_component++) {
-                            double dGsolv = NULL;
+                            double dGsolv = 0.0;
                             if (calculations[calculationIndex].concentrations[i_concentration][i_component] == 0.0f) {
 
                                 double RT = R_GAS_CONSTANT * calculations[calculationIndex].temperatures[i_concentration];

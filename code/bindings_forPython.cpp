@@ -386,7 +386,7 @@ void loadCalculationsOnPython(py::list calculationsOnPython) {
 		}
 		
 		newCalculation.number = (int)i;
-		finishCalculationInitiation(newCalculation, param);
+		finishCalculationInitiation(newCalculation);
 		calculations.push_back(newCalculation);
 	}
 

@@ -627,7 +627,7 @@ public:
 			}
 
 			newCalculation.number = (int)i;
-			finishCalculationInitiation(newCalculation, param);
+			finishCalculationInitiation(newCalculation);
 			// the following std::move statement is very important as otherwise the Eigen::Map
 			// are pointing to matrices deleted after exiting this function
 			calculations.push_back(std::move(newCalculation));
