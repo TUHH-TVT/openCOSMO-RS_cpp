@@ -224,19 +224,16 @@ void averageAndClusterSegments(parameters& param, molecule& _molecule, int appro
         if (numberOfAtoms == 3 && numberOfHAtoms == 2 && numberOfOAtoms == 1){
             _molecule.molarVolumeAt25C = 18.06863632;
         } else {
-            double firstSigmaMoment = (averagedSigmas.array() * _molecule.segmentAreas.array()).sum();
             Eigen::ArrayXd averagedSigmasSquared = averagedSigmas.array() * averagedSigmas.array();
             double secondSigmaMoment = (averagedSigmasSquared * _molecule.segmentAreas.array()).sum() * 10000;
             double fourthSigmaMoment = (averagedSigmasSquared * averagedSigmasSquared * _molecule.segmentAreas.array()).sum() * 100000000;
 
-            _molecule.molarVolumeAt25C = 1.34036772e-01 * _molecule.Volume \
-                + 1.22332837e+00 * numberOfAtoms \
-                + 5.21370980e-01 * _molecule.Area \
-                + 1.61941481e+03 * firstSigmaMoment \
-                - 3.31924932e-01 * secondSigmaMoment \
-                + 2.98304816e-02 * fourthSigmaMoment \
-                + 7.84638029 * numberOfSiAtoms \
-                + 4.97475457;
+            _molecule.molarVolumeAt25C = 0.9430785419976806 * numberOfAtoms \
+                + 0.6977322963011842 * _molecule.Area \
+                - 0.3161763939689293 * secondSigmaMoment \
+                + 0.032441059832647084 * fourthSigmaMoment \
+                + 8.113026329415828 * numberOfSiAtoms \
+                - 0.07066832029215675;
         }
     }
 
