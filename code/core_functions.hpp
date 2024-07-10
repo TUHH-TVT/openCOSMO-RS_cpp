@@ -81,53 +81,59 @@ float hsum256_ps_avx(__m256 v) {
 }
 #endif
 
-void initialize(parameters& param, bool showBinarySpecs = true) {
+void initialize(parameters& param, bool initializeParameters = true, bool initializeMolecules = true, bool initializeCalculations = true, bool showBinarySpecs = true) {
 
-    n_ex = 0;
-    molecules.clear();
-    calculations.clear();
 
-    param.ChargeRaster.clear();
-    param.exp_param.clear();
-    param.R_i = std::vector<double>(118, 0.0);
-    param.R_i_COSMO = std::vector<double>(118, 0.0);
-    param.HBClassElmnt = std::vector<int>(300, 0);
+    if (initializeParameters) {
+        n_ex = 0;
+        param.ChargeRaster.clear();
+        param.exp_param.clear();
+        param.R_i = std::vector<double>(118, 0.0);
+        param.R_i_COSMO = std::vector<double>(118, 0.0);
+        param.HBClassElmnt = std::vector<int>(300, 0);
 
-    // Initialize hydrogen bond classes of the elements HBClassElmnt
-    // 0 : only non HB  | 1 : potential donor  | 2 : potential acceptor | 3 : potential donor or acceptor
-    // classify all hydrogens and some metals as potential donors and all others as potential acceptors.
+        // Initialize hydrogen bond classes of the elements HBClassElmnt
+        // 0 : only non HB  | 1 : potential donor  | 2 : potential acceptor | 3 : potential donor or acceptor
+        // classify all hydrogens and some metals as potential donors and all others as potential acceptors.
 
-    for (int atomic_number = 0; atomic_number < param.HBClassElmnt.size(); atomic_number++) {
-        if (atomic_number <= 100) param.HBClassElmnt[atomic_number] = 2;
-        else if (atomic_number > 100) param.HBClassElmnt[atomic_number] = 1;   // all hydrogens
+        for (int atomic_number = 0; atomic_number < param.HBClassElmnt.size(); atomic_number++) {
+            if (atomic_number <= 100) param.HBClassElmnt[atomic_number] = 2;
+            else if (atomic_number > 100) param.HBClassElmnt[atomic_number] = 1;   // all hydrogens
+        }
+
+        // set some values manually
+        param.HBClassElmnt[1] = 1;   // hydrogen
+        param.HBClassElmnt[3] = 1;   // li 
+        param.HBClassElmnt[4] = 1;   // be 
+        param.HBClassElmnt[11] = 1;  // na 
+        param.HBClassElmnt[12] = 1;  // mg 
+        param.HBClassElmnt[13] = 1;  // al 
+        param.HBClassElmnt[19] = 1;  // k* 
+        param.HBClassElmnt[20] = 1;  // ca 
+        param.HBClassElmnt[24] = 1;  // cr 
+        param.HBClassElmnt[26] = 1;  // fe 
+        param.HBClassElmnt[27] = 1;  // co 
+        param.HBClassElmnt[29] = 1;  // cu 
+        param.HBClassElmnt[30] = 1;  // zn 
+        param.HBClassElmnt[37] = 1;  // rb 
+        param.HBClassElmnt[38] = 1;  // sr 
+        param.HBClassElmnt[48] = 1;  // cd 
+        param.HBClassElmnt[55] = 1;  // cs 
+        param.HBClassElmnt[56] = 1;  // ba 
+
+
+        // initialize charge raster
+        int steps = (int)((param.sigmaMax - param.sigmaMin) / param.sigmaStep + 1 + 0.00001);
+        for (int i = 0; i < steps; i++) {
+            param.ChargeRaster.push_back(param.sigmaMin + param.sigmaStep * i);
+        }
     }
 
-    // set some values manually
-    param.HBClassElmnt[1] = 1;   // hydrogen
-    param.HBClassElmnt[3] = 1;   // li 
-    param.HBClassElmnt[4] = 1;   // be 
-    param.HBClassElmnt[11] = 1;  // na 
-    param.HBClassElmnt[12] = 1;  // mg 
-    param.HBClassElmnt[13] = 1;  // al 
-    param.HBClassElmnt[19] = 1;  // k* 
-    param.HBClassElmnt[20] = 1;  // ca 
-    param.HBClassElmnt[24] = 1;  // cr 
-    param.HBClassElmnt[26] = 1;  // fe 
-    param.HBClassElmnt[27] = 1;  // co 
-    param.HBClassElmnt[29] = 1;  // cu 
-    param.HBClassElmnt[30] = 1;  // zn 
-    param.HBClassElmnt[37] = 1;  // rb 
-    param.HBClassElmnt[38] = 1;  // sr 
-    param.HBClassElmnt[48] = 1;  // cd 
-    param.HBClassElmnt[55] = 1;  // cs 
-    param.HBClassElmnt[56] = 1;  // ba 
+    if (initializeMolecules)
+        molecules.clear();
 
-
-    // initialize charge raster
-    int steps = (int)((param.sigmaMax - param.sigmaMin) / param.sigmaStep + 1 + 0.00001);
-    for (int i = 0; i < steps; i++) {
-        param.ChargeRaster.push_back(param.sigmaMin + param.sigmaStep * i);
-    }
+    if (initializeCalculations)
+        calculations.clear();
 
     if (showBinarySpecs)
         display("\nBINARY SPECS\n-------------------------\n" + compilation_mode + "\n" + OPENMP_parallelization + "\n" + vectorization_level + "\n-------------------------\n\n");

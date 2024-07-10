@@ -149,12 +149,17 @@ void loadMoleculesOnPython(py::dict options, py::dict parameters, py::list compo
 
 }
 
-void loadCalculationsOnPython(py::list calculationsOnPython) {
+void loadCalculationsOnPython(py::list calculationsOnPython, bool reload = false) {
 
 	n_ex += 1;
 
-	if (n_ex != 2) {
-		throw std::runtime_error("loadCalculations should only be executed once after calling loadMolecules.");
+	if (reload) {
+		initialize(param, false, false, true, false);
+	}
+	else {
+		if (n_ex != 2) {
+			throw std::runtime_error("loadCalculations should only be executed once after calling loadMolecules.");
+		}
 	}
 
 	// load the calculations
@@ -511,10 +516,11 @@ PYBIND11_MODULE(openCOSMORS, m) {
 		This needs to be called before calling loadCalculations.
     )pbdoc");
 
-	m.def("loadCalculations", &loadCalculationsOnPython, R"pbdoc(
+	m.def("loadCalculations", &loadCalculationsOnPython, py::arg("calculationsOnPython"), py::arg("reload") = false, R"pbdoc(
         Loads all calculations.
 		This needs to be called before calling calculate.
     )pbdoc");
+
 	m.def("calculate", &calculateOnPython, py::arg("parameters"), py::arg("calculationsOnPython"), py::arg("reloadConcentrations") = false, py::arg("reloadReferenceConcentrations") = false, py::return_value_policy::reference, R"pbdoc(
         Calculates the complete list of calculations with the provided set of parameters.
 		These calculations should have been loaded with loadCalculations prior to executing calculate, otherwise this will produce an error.
