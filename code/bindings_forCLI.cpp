@@ -23,7 +23,7 @@ void initializeOnCLI() {
     display = displayOnCLI;
     displayTime = displayTimeOnCLI;
 
-    initialize(param, false);
+    initialize(param, true);
     param.sw_dGsolv_calculation_strict = 0;
     warnings = std::vector<std::string>();
     n_ex = 3;
