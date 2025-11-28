@@ -391,6 +391,8 @@ public:
 						thisMolecule->segments.SegmentTypeSigmaCorr[k],
 						thisMolecule->segments.SegmentTypeHBtype[k],
 						thisMolecule->segments.SegmentTypeAtomicNumber[k],
+						thisMolecule->segments.SegmentTypeAtomicPolariz[k],
+						//thisMolecule->segments.SegmentTypeAtomicIndex[k],
 						thisMolecule->segments.SegmentTypeAreas[k][0]);
 				}
 				newCalculation.components.push_back(thisMolecule);

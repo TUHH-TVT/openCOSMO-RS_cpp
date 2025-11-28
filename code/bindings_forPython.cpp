@@ -41,6 +41,9 @@ void loadParametersOnPython(py::dict parameters) {
 
 	param.Rav = parameters["Rav"].cast<double>();
 
+	param.E_F_corr = parameters["E_F_corr"].cast<double>();
+	param.m_vdW = parameters["m_vdW"].cast<double>();
+
 	if (param.sw_misfit > 0) {
 		param.fCorr = parameters["fCorr"].cast<double>();
 		param.RavCorr = parameters["RavCorr"].cast<double>();
@@ -64,6 +67,7 @@ void loadParametersOnPython(py::dict parameters) {
 		param.comb_SGG_lambda = parameters["comb_SGG_lambda"].cast<double>();
 		param.comb_SGG_beta = parameters["comb_SGG_beta"].cast<double>();
 	}
+
 
 	if (parameters.contains("dGsolv_eta")) {
 		param.dGsolv_eta = parameters["dGsolv_eta"].cast<double>();
@@ -119,6 +123,7 @@ void loadMoleculesOnPython(py::dict options, py::dict parameters, py::list compo
 	param.sw_differentiateHydrogens = options["sw_SR_differentiateHydrogens"].cast<int>();
 	param.sw_differentiateMoleculeGroups = options["sw_SR_differentiateMoleculeGroups"].cast<int>();
 	param.sw_COSMOfiles_type = options["sw_SR_COSMOfiles_type"].cast<std::string>();
+	param.sw_SR_polarizabilities = options["sw_SR_polarizabilities"].cast<int>();
 
 	if (param.sw_calculateContactStatisticsAndAdditionalProperties != 0) {
 		py::list partialInteractionMatrices = options["sw_SR_partialInteractionMatrices"];
@@ -149,17 +154,12 @@ void loadMoleculesOnPython(py::dict options, py::dict parameters, py::list compo
 
 }
 
-void loadCalculationsOnPython(py::list calculationsOnPython, bool reload = false) {
+void loadCalculationsOnPython(py::list calculationsOnPython) {
 
 	n_ex += 1;
 
-	if (reload) {
-		initialize(param, false, false, true, false);
-	}
-	else {
-		if (n_ex != 2) {
-			throw std::runtime_error("loadCalculations should only be executed once after calling loadMolecules.");
-		}
+	if (n_ex != 2) {
+		throw std::runtime_error("loadCalculations should only be executed once after calling loadMolecules.");
 	}
 
 	// load the calculations
@@ -195,6 +195,7 @@ void loadCalculationsOnPython(py::list calculationsOnPython, bool reload = false
 					thisMolecule->segments.SegmentTypeSigmaCorr[k],
 					thisMolecule->segments.SegmentTypeHBtype[k],
 					thisMolecule->segments.SegmentTypeAtomicNumber[k],
+					thisMolecule->segments.SegmentTypeAtomicPolariz[k],
 					thisMolecule->segments.SegmentTypeAreas[k][0]);
 			}
 
@@ -516,11 +517,10 @@ PYBIND11_MODULE(openCOSMORS, m) {
 		This needs to be called before calling loadCalculations.
     )pbdoc");
 
-	m.def("loadCalculations", &loadCalculationsOnPython, py::arg("calculationsOnPython"), py::arg("reload") = false, R"pbdoc(
+	m.def("loadCalculations", &loadCalculationsOnPython, R"pbdoc(
         Loads all calculations.
 		This needs to be called before calling calculate.
     )pbdoc");
-
 	m.def("calculate", &calculateOnPython, py::arg("parameters"), py::arg("calculationsOnPython"), py::arg("reloadConcentrations") = false, py::arg("reloadReferenceConcentrations") = false, py::return_value_policy::reference, R"pbdoc(
         Calculates the complete list of calculations with the provided set of parameters.
 		These calculations should have been loaded with loadCalculations prior to executing calculate, otherwise this will produce an error.
