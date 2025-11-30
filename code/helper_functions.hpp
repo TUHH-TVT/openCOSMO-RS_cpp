@@ -62,18 +62,7 @@ static inline std::vector<std::string> split(const std::string& haystack, char d
 	return retVal;
 }
 static inline double round_and_truncate(double number_val, int n) {
-	number_val = round(number_val * pow(10, n)) / pow(10, n);
-
-	double factor = 1;
-	double previous = std::trunc(number_val); // remove integer portion
-	number_val -= previous;
-	for (int i = 0; i < n; i++) {
-		number_val *= 10;
-		factor *= 10;
-	}
-	number_val = std::trunc(number_val);
-	number_val /= factor;
-	number_val += previous; // add back integer portion
+	number_val = round(number_val / pow(10, n)) * pow(10, n);
 	return number_val;
 }
 

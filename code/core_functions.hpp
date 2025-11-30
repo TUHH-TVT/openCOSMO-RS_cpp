@@ -11,14 +11,13 @@
 #include "COSMOfile_functions.hpp"
 #include <stdexcept>
 #include <functional>
+#include <iostream>
 
 
 #if defined(MEASURE_TIME) 
 #include <chrono>
-
 std::atomic<unsigned long> oneIteration_total_ms = 0;
 std::chrono::high_resolution_clock::time_point oneIteration_last;
-
 std::atomic<unsigned long> calculateTau_total_ms = 0;
 std::atomic<unsigned long> calculateCOSMOSPACE_total_ms = 0;
 std::atomic<unsigned long> calculateGammasForMolecules_total_ms = 0;
@@ -81,59 +80,53 @@ float hsum256_ps_avx(__m256 v) {
 }
 #endif
 
-void initialize(parameters& param, bool initializeParameters = true, bool initializeMolecules = true, bool initializeCalculations = true, bool showBinarySpecs = true) {
+void initialize(parameters& param, bool showBinarySpecs = true) {
 
+    n_ex = 0;
+    molecules.clear();
+    calculations.clear();
 
-    if (initializeParameters) {
-        n_ex = 0;
-        param.ChargeRaster.clear();
-        param.exp_param.clear();
-        param.R_i = std::vector<double>(118, 0.0);
-        param.R_i_COSMO = std::vector<double>(118, 0.0);
-        param.HBClassElmnt = std::vector<int>(300, 0);
+    param.ChargeRaster.clear();
+    param.exp_param.clear();
+    param.R_i = std::vector<double>(118, 0.0);
+    param.R_i_COSMO = std::vector<double>(118, 0.0);
+    param.HBClassElmnt = std::vector<int>(300, 0);
 
-        // Initialize hydrogen bond classes of the elements HBClassElmnt
-        // 0 : only non HB  | 1 : potential donor  | 2 : potential acceptor | 3 : potential donor or acceptor
-        // classify all hydrogens and some metals as potential donors and all others as potential acceptors.
+    // Initialize hydrogen bond classes of the elements HBClassElmnt
+    // 0 : only non HB  | 1 : potential donor  | 2 : potential acceptor | 3 : potential donor or acceptor
+    // classify all hydrogens and some metals as potential donors and all others as potential acceptors.
 
-        for (int atomic_number = 0; atomic_number < param.HBClassElmnt.size(); atomic_number++) {
-            if (atomic_number <= 100) param.HBClassElmnt[atomic_number] = 2;
-            else if (atomic_number > 100) param.HBClassElmnt[atomic_number] = 1;   // all hydrogens
-        }
-
-        // set some values manually
-        param.HBClassElmnt[1] = 1;   // hydrogen
-        param.HBClassElmnt[3] = 1;   // li 
-        param.HBClassElmnt[4] = 1;   // be 
-        param.HBClassElmnt[11] = 1;  // na 
-        param.HBClassElmnt[12] = 1;  // mg 
-        param.HBClassElmnt[13] = 1;  // al 
-        param.HBClassElmnt[19] = 1;  // k* 
-        param.HBClassElmnt[20] = 1;  // ca 
-        param.HBClassElmnt[24] = 1;  // cr 
-        param.HBClassElmnt[26] = 1;  // fe 
-        param.HBClassElmnt[27] = 1;  // co 
-        param.HBClassElmnt[29] = 1;  // cu 
-        param.HBClassElmnt[30] = 1;  // zn 
-        param.HBClassElmnt[37] = 1;  // rb 
-        param.HBClassElmnt[38] = 1;  // sr 
-        param.HBClassElmnt[48] = 1;  // cd 
-        param.HBClassElmnt[55] = 1;  // cs 
-        param.HBClassElmnt[56] = 1;  // ba 
-
-
-        // initialize charge raster
-        int steps = (int)((param.sigmaMax - param.sigmaMin) / param.sigmaStep + 1 + 0.00001);
-        for (int i = 0; i < steps; i++) {
-            param.ChargeRaster.push_back(param.sigmaMin + param.sigmaStep * i);
-        }
+    for (int atomic_number = 0; atomic_number < param.HBClassElmnt.size(); atomic_number++) {
+        if (atomic_number <= 100) param.HBClassElmnt[atomic_number] = 2;
+        else if (atomic_number > 100) param.HBClassElmnt[atomic_number] = 1;   // all hydrogens
     }
 
-    if (initializeMolecules)
-        molecules.clear();
+    // set some values manually
+    param.HBClassElmnt[1] = 1;   // hydrogen
+    param.HBClassElmnt[3] = 1;   // li 
+    param.HBClassElmnt[4] = 1;   // be 
+    param.HBClassElmnt[11] = 1;  // na 
+    param.HBClassElmnt[12] = 1;  // mg 
+    param.HBClassElmnt[13] = 1;  // al 
+    param.HBClassElmnt[19] = 1;  // k* 
+    param.HBClassElmnt[20] = 1;  // ca 
+    param.HBClassElmnt[24] = 1;  // cr 
+    param.HBClassElmnt[26] = 1;  // fe 
+    param.HBClassElmnt[27] = 1;  // co 
+    param.HBClassElmnt[29] = 1;  // cu 
+    param.HBClassElmnt[30] = 1;  // zn 
+    param.HBClassElmnt[37] = 1;  // rb 
+    param.HBClassElmnt[38] = 1;  // sr 
+    param.HBClassElmnt[48] = 1;  // cd 
+    param.HBClassElmnt[55] = 1;  // cs 
+    param.HBClassElmnt[56] = 1;  // ba 
 
-    if (initializeCalculations)
-        calculations.clear();
+
+    // initialize charge raster
+    int steps = (int)((param.sigmaMax - param.sigmaMin) / param.sigmaStep + 1 + 0.00001);
+    for (int i = 0; i < steps; i++) {
+        param.ChargeRaster.push_back(param.sigmaMin + param.sigmaStep * i);
+    }
 
     if (showBinarySpecs)
         display("\nBINARY SPECS\n-------------------------\n" + compilation_mode + "\n" + OPENMP_parallelization + "\n" + vectorization_level + "\n-------------------------\n\n");
@@ -205,8 +198,8 @@ void averageAndClusterSegments(parameters& param, molecule& _molecule, int appro
     }
 
     bool calculateSolvationEnergies = param.dGsolv_E_gas.size() > 0;
-    if (calculateSolvationEnergies){
-        if (_molecule.qmMethod != "DFT_CPCM_BP86_def2-TZVP+def2-TZVPD_SP" && _molecule.qmMethod != "DFT_BP86_def2-TZVPD_SP"){
+    if (calculateSolvationEnergies) {
+        if (_molecule.qmMethod != "DFT_CPCM_BP86_def2-TZVP+def2-TZVPD_SP" && _molecule.qmMethod != "DFT_BP86_def2-TZVPD_SP") {
             if (param.sw_dGsolv_calculation_strict == 1) {
                 throw std::runtime_error("The QSPR model for the molar volume only works for the quantum chemistry method DFT_BP86_def2-TZVPD_SP");
             }
@@ -218,7 +211,7 @@ void averageAndClusterSegments(parameters& param, molecule& _molecule, int appro
         int numberOfSiAtoms = 0;
         int numberOfHAtoms = 0;
         int numberOfOAtoms = 0;
-        for (int i = 0; i < numberOfAtoms; i++){
+        for (int i = 0; i < numberOfAtoms; i++) {
             if (_molecule.atomAtomicNumbers[i] == 14)
                 numberOfSiAtoms += 1;
             else if (_molecule.atomAtomicNumbers[i] == 1 || _molecule.atomAtomicNumbers[i] > 100)
@@ -227,9 +220,10 @@ void averageAndClusterSegments(parameters& param, molecule& _molecule, int appro
                 numberOfOAtoms += 1;
         }
 
-        if (numberOfAtoms == 3 && numberOfHAtoms == 2 && numberOfOAtoms == 1){
+        if (numberOfAtoms == 3 && numberOfHAtoms == 2 && numberOfOAtoms == 1) {
             _molecule.molarVolumeAt25C = 18.06863632;
-        } else {
+        }
+        else {
             Eigen::ArrayXd averagedSigmasSquared = averagedSigmas.array() * averagedSigmas.array();
             double secondSigmaMoment = (averagedSigmasSquared * _molecule.segmentAreas.array()).sum() * 10000;
             double fourthSigmaMoment = (averagedSigmasSquared * averagedSigmasSquared * _molecule.segmentAreas.array()).sum() * 100000000;
@@ -315,14 +309,108 @@ void averageAndClusterSegments(parameters& param, molecule& _molecule, int appro
         // for monoatomic ions or if misfit correlation is deactivated
         if (_molecule.moleculeGroup == 3 || _molecule.moleculeGroup == 5 || calculateMisfitCorrelation == false) {
 
-            _molecule.segments.add(0, _molecule.moleculeGroup, sigmaLeft, 0.0f, _molecule.segmentHydrogenBondingType(j), atomicNumber, AsigmaLeft);
-            _molecule.segments.add(0, _molecule.moleculeGroup, sigmaRight, 0.0f, _molecule.segmentHydrogenBondingType(j), atomicNumber, AsigmaRight);
+            _molecule.segments.add(0, _molecule.moleculeGroup, sigmaLeft, 0.0f, _molecule.segmentHydrogenBondingType(j), atomicNumber, _molecule.segmentAtomicPolariz(j), AsigmaLeft);
+            _molecule.segments.add(0, _molecule.moleculeGroup, sigmaRight, 0.0f, _molecule.segmentHydrogenBondingType(j), atomicNumber, _molecule.segmentAtomicPolariz(j), AsigmaRight);
         }
         else {
-            _molecule.segments.add(0, _molecule.moleculeGroup, sigmaLeft, sigmaCorrLeft, _molecule.segmentHydrogenBondingType(j), atomicNumber, AsigmaLeftSigmaCorrLeft);
-            _molecule.segments.add(0, _molecule.moleculeGroup, sigmaLeft, sigmaCorrRight, _molecule.segmentHydrogenBondingType(j), atomicNumber, AsigmaLeftSigmaCorrRight);
-            _molecule.segments.add(0, _molecule.moleculeGroup, sigmaRight, sigmaCorrLeft, _molecule.segmentHydrogenBondingType(j), atomicNumber, AsigmaRightSigmaCorrLeft);
-            _molecule.segments.add(0, _molecule.moleculeGroup, sigmaRight, sigmaCorrRight, _molecule.segmentHydrogenBondingType(j), atomicNumber, AsigmaRightSigmaCorrRight);
+            _molecule.segments.add(0, _molecule.moleculeGroup, sigmaLeft, sigmaCorrLeft, _molecule.segmentHydrogenBondingType(j), atomicNumber, _molecule.segmentAtomicPolariz(j), AsigmaLeftSigmaCorrLeft);
+            _molecule.segments.add(0, _molecule.moleculeGroup, sigmaLeft, sigmaCorrRight, _molecule.segmentHydrogenBondingType(j), atomicNumber, _molecule.segmentAtomicPolariz(j), AsigmaLeftSigmaCorrRight);
+            _molecule.segments.add(0, _molecule.moleculeGroup, sigmaRight, sigmaCorrLeft, _molecule.segmentHydrogenBondingType(j), atomicNumber, _molecule.segmentAtomicPolariz(j), AsigmaRightSigmaCorrLeft);
+            _molecule.segments.add(0, _molecule.moleculeGroup, sigmaRight, sigmaCorrRight, _molecule.segmentHydrogenBondingType(j), atomicNumber, _molecule.segmentAtomicPolariz(j), AsigmaRightSigmaCorrRight);
+        }
+    }
+}
+
+
+inline Eigen::MatrixXd extractAtomicPolarizabilityTensor(molecule& _molecule, int atomIndex) {
+
+    int numberOfAtoms = int(_molecule.atomAtomicNumbers.size());
+    Eigen::MatrixXd polarizabilityTensors = _molecule.atomPolarizabilityTensors;
+    Eigen::MatrixXd polarizabilityTensor(3,3);
+    Eigen::VectorXd polarizabilityTensorLine = polarizabilityTensors.row(atomIndex);
+
+    polarizabilityTensor(0,0) = polarizabilityTensorLine(0);
+    polarizabilityTensor(1,1) = polarizabilityTensorLine(1);
+    polarizabilityTensor(2,2) = polarizabilityTensorLine(2);
+    polarizabilityTensor(0,1) = polarizabilityTensorLine(3);
+    polarizabilityTensor(1,0) = polarizabilityTensorLine(3);
+    polarizabilityTensor(0,2) = polarizabilityTensorLine(4);
+    polarizabilityTensor(2,0) = polarizabilityTensorLine(4);
+    polarizabilityTensor(1,2) = polarizabilityTensorLine(5);
+    polarizabilityTensor(2,1) = polarizabilityTensorLine(5);
+
+    return polarizabilityTensor;
+}
+
+void projectSegments(parameters& param, molecule& _molecule) {
+    // project polarizability tensors onto segments and scale them
+
+    int numberOfSegments = int(_molecule.segmentAreas.size());
+    int numberOfAtoms = int(_molecule.atomAtomicNumbers.size());
+
+    double polarizability_projection;
+
+    Eigen::MatrixXd surfaceCoordinatesInAu = _molecule.segmentPositions / 0.529177249;
+    Eigen::VectorXd surfaceAreasInAu = _molecule.segmentAreas / pow(0.529177249, 2);
+    Eigen::VectorXd surfaceRadiiSquared = _molecule.segmentAreas / PI;
+    Eigen::MatrixXd atomCoordinatesInAu = _molecule.atomPositions / 0.529177249;
+    Eigen::VectorXi segmentAtomIndex = _molecule.segmentAtomIndices;
+    Eigen::MatrixXd polarizabilityTensor(3, 3);
+    Eigen::VectorXd areaOfAtom = Eigen::VectorXd::Zero(numberOfAtoms);
+    Eigen::VectorXd segmentsperAtom = Eigen::VectorXd::Zero(numberOfAtoms);
+    Eigen::VectorXd distanceSegmentAtom(3);
+
+    if (param.sw_SR_polarizabilities == 0) {
+        for (int segmentIndexI = 0; segmentIndexI < numberOfSegments; segmentIndexI++) {
+            _molecule.segmentAtomicPolariz(segmentIndexI) = 0;
+        }
+    }
+    else {
+        for (int segmentIndexI = 0; segmentIndexI < numberOfSegments; segmentIndexI++) {
+            int atomIndex = segmentAtomIndex(segmentIndexI);
+            areaOfAtom(atomIndex) = areaOfAtom(atomIndex) + surfaceAreasInAu(segmentIndexI);
+            segmentsperAtom(atomIndex) = segmentsperAtom(atomIndex) + 1;
+        }
+
+
+        for (int segmentIndexI = 0; segmentIndexI < numberOfSegments; segmentIndexI++) {
+            int atomIndex = segmentAtomIndex(segmentIndexI);
+            for (int k = 0; k < 3; k++) {
+                distanceSegmentAtom(k) = abs(surfaceCoordinatesInAu(segmentIndexI, k) - atomCoordinatesInAu(atomIndex, k));
+            }
+            double distanceSegmentAtom_norm = distanceSegmentAtom(0) + distanceSegmentAtom(1) + distanceSegmentAtom(2);
+            distanceSegmentAtom = distanceSegmentAtom / distanceSegmentAtom_norm;
+            polarizabilityTensor = extractAtomicPolarizabilityTensor(_molecule, atomIndex);
+
+            Eigen::RowVector3d distanceSegmentAtom_row = distanceSegmentAtom.transpose();
+            Eigen::RowVector3d tmp_vec = distanceSegmentAtom_row * polarizabilityTensor;
+
+            polarizability_projection = tmp_vec.norm();
+
+            if (param.sw_SR_polarizabilities == 5) {
+                polarizability_projection = round_and_truncate(polarizability_projection, 1);
+            }
+            else if (param.sw_SR_polarizabilities == 1) {
+                polarizability_projection = round_and_truncate(polarizability_projection / segmentsperAtom(atomIndex), -1);
+            }
+            else if (param.sw_SR_polarizabilities == 3) {
+                polarizability_projection = round_and_truncate(polarizability_projection * surfaceAreasInAu(segmentIndexI) / areaOfAtom(atomIndex), -1);
+            }
+            _molecule.segmentAtomicPolariz(segmentIndexI) = polarizability_projection;
+        }
+
+        if (param.sw_SR_polarizabilities == 6 || param.sw_SR_polarizabilities == 7 || param.sw_SR_polarizabilities == 8) {
+            Eigen::VectorXd segmentAtomicPolarizCopy = _molecule.segmentAtomicPolariz;
+            for (int segmentIndexI = 0; segmentIndexI < numberOfSegments; segmentIndexI++) {
+                Eigen::VectorXd distanceSegmentAllSegments = Eigen::VectorXd::Zero(numberOfSegments);
+                Eigen::VectorXd averagingFactors = Eigen::VectorXd::Zero(numberOfSegments);
+                double RavSquared = param.Rav * param.Rav;
+                distanceSegmentAllSegments(Eigen::indexing::all) = 0.52917721067121 * (surfaceCoordinatesInAu(segmentIndexI, Eigen::indexing::all).replicate(numberOfSegments, 1) - surfaceCoordinatesInAu).array().square().rowwise().sum().sqrt();
+                averagingFactors = ((surfaceRadiiSquared * RavSquared).array() / (surfaceRadiiSquared.array() + RavSquared)) * exp(-1 * distanceSegmentAllSegments.array().square() / (surfaceRadiiSquared.array() + RavSquared));
+                averagingFactors = averagingFactors / averagingFactors.sum();
+                polarizability_projection = (segmentAtomicPolarizCopy.array() * averagingFactors.array()).sum();
+                _molecule.segmentAtomicPolariz(segmentIndexI) = round_and_truncate(polarizability_projection, 1);
+            }
         }
     }
 }
@@ -332,9 +420,11 @@ molecule loadNewMolecule(parameters& param, std::string componentPath) {
     molecule newMolecule;
     if (param.sw_COSMOfiles_type == "Turbomole_COSMO_TZVP" || param.sw_COSMOfiles_type == "Turbomole_COSMO_TZVPD_FINE") {
         newMolecule = getMoleculeFromTurbomoleCOSMOfile(componentPath);
-    } else if (param.sw_COSMOfiles_type == "ORCA_COSMO_TZVPD") {
+    }
+    else if (param.sw_COSMOfiles_type == "ORCA_COSMO_TZVPD") {
         newMolecule = getMoleculeFromORCACOSMOfile(componentPath);
-    } else {
+    }
+    else {
         throw std::runtime_error("No method for reading COSMOfiles has been implemented for the following type: " + param.sw_COSMOfiles_type);
     }
 
@@ -410,7 +500,7 @@ molecule loadNewMolecule(parameters& param, std::string componentPath) {
     // this changes the atomic number of a hydrogen atom to 100 + the atomic number of the closest heavy atom
     // giving the abbility to differentiate between hydrogen atoms depending on the atom they are bound to.
     if (param.sw_differentiateHydrogens == 1) {
-        
+
         for (int atomIndexI = 0; atomIndexI < numberOfAtoms; atomIndexI++) {
             double minimumDistanceAtomIAtomJSquared = 10e14;
             int closestAtomIndex = -1;
@@ -452,6 +542,9 @@ molecule loadNewMolecule(parameters& param, std::string componentPath) {
     }
 
     newMolecule.segmentHydrogenBondingType = Eigen::VectorXi(numberOfSegments);
+    newMolecule.segmentAtomicPolariz = Eigen::VectorXd(numberOfSegments);
+
+    projectSegments(param,newMolecule);
     averageAndClusterSegments(param, newMolecule);
 
     newMolecule.clear_unneeded_matrices(param.sw_alwaysReloadSigmaProfiles);
@@ -560,6 +653,7 @@ void rescaleSegments(parameters& param, calculation& _calculation) {
         }
     }
 }
+
 
 void calculateSegmentConcentrations(calculation& _calculation) {
     // calculate the mole fraction of segments for each concentration
@@ -790,7 +884,7 @@ void calculateLnGammaCombinatorial(parameters& param, calculation& _calculation)
             }
         }
     }
-    else if (param.sw_combTerm != 0) { 
+    else if (param.sw_combTerm != 0) {
         throw std::runtime_error("Error: Invalid switch value for combinatorial term.\n");
     }
 
@@ -898,7 +992,7 @@ void calculateLnGammaResidual(parameters& param, calculation& _calculation) {
         calculateInteractionMatrix(_calculation.segments, A_int, partialInteractionMatrices, param, temperature);
 
         // if the full interaction matrix is needed, fill upper right half
-        if (param.sw_calculateContactStatisticsAndAdditionalProperties > 0){
+        if (param.sw_calculateContactStatisticsAndAdditionalProperties > 0) {
             for (int i = 0; i < numberOfSegments; i++) {
                 for (int j = i + 1; j < numberOfSegments; j++) {
                     // always j >= i + 1
@@ -1074,7 +1168,7 @@ void calculateLnGammaResidual(parameters& param, calculation& _calculation) {
                         for (int k = lowerBoundIndexForCOSMOSPACECalculation; k < upperBoundIndexForCOSMOSPACECalculation; k += 8) {
                             //tempSum += hsum256_ps_avx(_mm256_mul_ps(_mm256_load_ps(vTauX + columnSum + k), _mm256_load_ps(vGammas + k))); // less accurate
                             tempVectorSum = _mm256_add_ps(_mm256_mul_ps(_mm256_load_ps(vTauX + columnSum + k), _mm256_load_ps(vGammas + k)), tempVectorSum); //AVX
-                    }
+                        }
 
                         tempSum = hsum256_ps_avx(tempVectorSum);
 #else//SSE3
@@ -1086,7 +1180,7 @@ void calculateLnGammaResidual(parameters& param, calculation& _calculation) {
 
                         tempSum = hsum_ps_sse3(tempVectorSum);
 #endif
-                }
+                    }
 
                     // newGamma
                     tempSum = 1 / tempSum;
@@ -1243,6 +1337,7 @@ void calculate(std::vector<int>& calculationIndices) {
                             thisMolecule->segments.SegmentTypeSigmaCorr[k],
                             thisMolecule->segments.SegmentTypeHBtype[k],
                             thisMolecule->segments.SegmentTypeAtomicNumber[k],
+                            thisMolecule->segments.SegmentTypeAtomicPolariz[k],
                             thisMolecule->segments.SegmentTypeAreas[k][0]);
                     }
                 }
@@ -1281,16 +1376,19 @@ void calculate(std::vector<int>& calculationIndices) {
 
             // calculate residual part
             calculateLnGammaResidual(param, calculations[calculationIndex]);
+            //  using std::cout;
+            //  using std::endl;
+            //  std::cout << "residual is calculated";
 
 #ifdef MEASURE_TIME
             calculateResidual_total_ms += std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::high_resolution_clock::now() - calculateResidual_last).count();
 #endif
 
             calculations[calculationIndex].lnGammaTotal = calculations[calculationIndex].lnGammaCombinatorial + calculations[calculationIndex].lnGammaResidual;
-            
+
             bool calculateSolvationEnergies = param.dGsolv_E_gas.size() > 0;
-            if (calculateSolvationEnergies){
-                double kcalPerMol_per_Hartree = 2625.499639479/4.184;
+            if (calculateSolvationEnergies) {
+                double kcalPerMol_per_Hartree = 2625.499639479 / 4.184;
                 double reference_pressure = 101325; // Pa = 1 atm;
                 std::vector<int> atomicNumbersWithout_dGsolv_tau = std::vector<int>();
                 double approximate_dGsolv_tau = 0.0262; // median of other values
@@ -1330,7 +1428,7 @@ void calculate(std::vector<int>& calculationIndices) {
                                         this_atom_dGsolv_tau = approximate_dGsolv_tau;
                                         atomicNumbersWithout_dGsolv_tau.push_back(it.first);
                                     }
-                                    
+
                                     E_vdw += this_atom_dGsolv_tau * it.second;
                                 }
                                 double referenceStateCorrection = RT_kcalPerMol * log(molar_volume_ideal_gas / (calculations[calculationIndex].components[i_solvent_component]->molarVolumeAt25C / 1E6));
@@ -1361,7 +1459,8 @@ void calculate(std::vector<int>& calculationIndices) {
 
                 }
             }
-        });
+            });
     }
     e.rethrow();
 }
+

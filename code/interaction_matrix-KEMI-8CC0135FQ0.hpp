@@ -31,37 +31,39 @@ void calculateInteractionMatrix(segmentTypeCollection& segments, Eigen::MatrixXf
 
     std::vector<double> ChargeRaster = param.ChargeRaster;
 
+    // display("matrix ok");
     // neutral - neutral interactions -------------------------------------------------------------------------------------------------
     // misfit 
-    double const misfit_prefactor = param.Aeff * param.alpha * 7322000.0 * 0.5;
+    // double const misfit_prefactor = param.Aeff * param.alpha * 7281000.0 * 0.5;
+    double const misfit_prefactor = param.Aeff * param.alpha * 7287000.0 * 0.5;
 
 
     std::map<int, double> ioniz_map;;
     double ionizationPotentialCorrection = 0;
 
+ 
     // hb
     double CHB_T = 0;
     double buffdb1 = 1.0 - param.CHBT + param.CHBT * (298.15 / (temperature));
-    if (buffdb1 > 0) CHB_T = param.CHB * 43421000.0 * buffdb1;
+    // if (buffdb1 > 0) CHB_T = param.CHB * 43327000.0 * buffdb1;
+    if (buffdb1 > 0) CHB_T = param.CHB * 43345000.0 * buffdb1;
+
+
+    double const m_alpha = abs(param.exp_param.at("m_alpha"));
+    double const m_alpha2 = abs(param.exp_param.at("m_alpha2"));
+    double const b_alpha = abs(param.exp_param.at("b_alpha"));
 
     double const hb_prefactor = param.Aeff * CHB_T;
     double val = 0;
     double vdw_val = 0;
 
-    ioniz_map[1] = 13.598; // H (to C)   
-    ioniz_map[7] = 14.534;       // F
-    ioniz_map[8] = 13.618;       // F
     ioniz_map[6] = 11.26;       // F
     ioniz_map[9] = 17.423;       // F
-    ioniz_map[14] = 8.152;    // Cl
-    ioniz_map[15] = 10.487;    // Br
-    ioniz_map[16] = 10.36;    // I
     ioniz_map[17] = 12.968;    // Cl
     ioniz_map[35] = 11.814;    // Br
     ioniz_map[53] = 10.451;    // I
+    ioniz_map[1] = 13.598; // H (to C)    
 
-
- 
     int UpperBoundIndexForNeutralComponents = std::max(segments.upperBoundIndexForGroup[0], segments.upperBoundIndexForGroup[1]);
     UpperBoundIndexForNeutralComponents = std::max(UpperBoundIndexForNeutralComponents, segments.upperBoundIndexForGroup[2]);
 
@@ -88,12 +90,15 @@ void calculateInteractionMatrix(segmentTypeCollection& segments, Eigen::MatrixXf
                 val =misfit_prefactor * sigmaMFij * (sigmaMFij + param.fCorr * (sigmaTransi + sigmaTransj));
 
                 if (segments.SegmentTypeAtomicNumber[i] == 9 || segments.SegmentTypeAtomicNumber[j] == 9 ) {
-                    val = misfit_prefactor * sigmaMFij * (sigmaMFij + param.fCorr * (sigmaTransi + sigmaTransj)) + param.E_F_corr;
+                    val = misfit_prefactor * sigmaMFij * (sigmaMFij + param.fCorr * (sigmaTransi + sigmaTransj)) + m_alpha2;
                 }
             }
             else {
 
                 val = misfit_prefactor * sigmaMFij * sigmaMFij;
+                if (segments.SegmentTypeAtomicNumber[i] == 9 || segments.SegmentTypeAtomicNumber[j] == 9) {
+                    val = misfit_prefactor * sigmaMFij * sigmaMFij + m_alpha2;
+                }
             }
 
 
@@ -118,22 +123,22 @@ void calculateInteractionMatrix(segmentTypeCollection& segments, Eigen::MatrixXf
 
             }
             vdw_val = 0.0;
-
            
-            if (param.sw_SR_polarizabilities > 0) {
 
-                if (param.sw_SR_polarizabilities == 7) {
-                    ionizationPotentialCorrection = 1/ioniz_map[segments.SegmentTypeAtomicNumber[i]]/ioniz_map[segments.SegmentTypeAtomicNumber[j]];
-                    vdw_val = param.Aeff * param.m_vdW * sqrt(alphai * alphaj * ionizationPotentialCorrection);
-                }
-                else if (param.sw_SR_polarizabilities == 8) {
-                    ionizationPotentialCorrection = 1/(ioniz_map[segments.SegmentTypeAtomicNumber[i]] + ioniz_map[segments.SegmentTypeAtomicNumber[j]]);
-                    vdw_val = param.Aeff * param.m_vdW * sqrt(alphai * alphaj) * ionizationPotentialCorrection;
-                }
-                else {
-                    vdw_val = param.Aeff * param.m_vdW * sqrt(alphai * alphaj);
-                }
+            if (param.sw_SR_polarizabilities == 7) {
+                ionizationPotentialCorrection = 1 / ioniz_map[segments.SegmentTypeAtomicNumber[i]] / ioniz_map[segments.SegmentTypeAtomicNumber[j]];
+                vdw_val = param.Aeff * m_alpha * sqrt(alphai * alphaj* ionizationPotentialCorrection);
             }
+            else if (param.sw_SR_polarizabilities == 8) {
+                ionizationPotentialCorrection = 1 / (ioniz_map[segments.SegmentTypeAtomicNumber[i]] + ioniz_map[segments.SegmentTypeAtomicNumber[j]]);
+                vdw_val = param.Aeff * m_alpha * sqrt(alphai * alphaj) * ionizationPotentialCorrection;
+            }
+            else {
+                vdw_val = param.Aeff * m_alpha * sqrt(alphai * alphaj);
+            }
+
+
+
 
             // always j >= i
             val -= vdw_val;

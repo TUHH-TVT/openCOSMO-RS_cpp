@@ -2,7 +2,7 @@
 #pragma once
 #include <fstream>
 #include <iostream>
-#include<json.hpp>
+#include "nlohmann/json.hpp"
 #include "general.hpp"
 #include "core_functions.hpp"
 
@@ -23,7 +23,7 @@ void initializeOnCLI() {
     display = displayOnCLI;
     displayTime = displayTimeOnCLI;
 
-    initialize(param, true);
+    initialize(param, false);
     param.sw_dGsolv_calculation_strict = 0;
     warnings = std::vector<std::string>();
     n_ex = 3;
@@ -153,6 +153,7 @@ void loadCalculationsOnCLI(const json& calculationsOnCLI) {
                     thisMolecule->segments.SegmentTypeSigmaCorr[k],
                     thisMolecule->segments.SegmentTypeHBtype[k],
                     thisMolecule->segments.SegmentTypeAtomicNumber[k],
+                    thisMolecule->segments.SegmentTypeAtomicPolariz[k],
                     thisMolecule->segments.SegmentTypeAreas[k][0]);
             }
 

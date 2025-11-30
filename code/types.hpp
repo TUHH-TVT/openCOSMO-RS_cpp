@@ -1,6 +1,6 @@
 /*
-    c++ implementation of openCOSMO-RS including multiple segment descriptors
-    @author: Simon Mueller, 2022
+	c++ implementation of openCOSMO-RS including multiple segment descriptors
+	@author: Simon Mueller, 2022
 */
 
 
@@ -48,15 +48,15 @@ void apply_vector_permutation_in_place(std::vector<T>& vec, const std::vector<in
 
 struct parameters {
 
-    /* General switches */
-    int sw_misfit = 2;              /* switch: "0" to use misfit contribution without accounting for sigma correlation. 
-                                           "1" to account for sigma correlation in misfit contribution 
+	/* General switches */
+	int sw_misfit = 0;              /* switch: "0" to use misfit contribution without accounting for sigma correlation.
+										   "1" to account for sigma correlation in misfit contribution
 										   "2" to account for sigma correlation in misfit contribution except for ions */
 
 	int sw_useSegmentReferenceStateForInteractionMatrix = 0;		/* switch: "0" Set segment reference state to pure segment (COSMO-RS default) (segment reference state cancels if molecular refstate calculated)
 																	   "1" Set segment reference state to conductor (segment reference state cancels if molecular refstate calculated) */
 
-   	int sw_combTerm = 1;            /* switch:  "0" No combinatorial term
+	int sw_combTerm = 1;            /* switch:  "0" No combinatorial term
 											"1" to use the combinatorial term by Staverman-Guggenheim
 											"2" to use the combinatorial term by Klamt (2003)
 											"3" to use modified Staverman-Guggenheim combinatorial term with exponential scaling */
@@ -64,12 +64,13 @@ struct parameters {
 	int sw_atomicNumber = 1; // whether or not to use the atomic number as descriptor
 
 	int sw_differentiateHydrogens = 0;
+	int sw_SR_polarizabilities = 0;
 	int sw_differentiateMoleculeGroups = 0;
 
 	std::string sw_COSMOfiles_type = "ORCA_COSMO_TZVPD"; // Type of COSMOfile used, this is used to know which function to use to load the sigma profile. e.g. Turbomole
 
 	int sw_calculateContactStatisticsAndAdditionalProperties = 0;		/* switch:  "0" Do not calculate contact statistics
-																				"1" Calculate contact statistics 
+																				"1" Calculate contact statistics
 																				"2" Calculate contact statistics, partial molar properties and average surface energies*/
 	int numberOfPartialInteractionMatrices;
 
@@ -86,16 +87,16 @@ struct parameters {
 
 	int sw_dGsolv_calculation_strict = 1; // 0Allows calculation of solvation free energies also for atoms that have not been parameterized, but gives a warning
 										  // 1: Allows calculation of solvation free energies if all parameters are available
-    /* COSMO-RS MODEL PARAMETERS */
-    /* General parameters */
-    double Aeff;                    /* area of effective thermodynamic contact  [Angstrom^2] */
-    double alpha;                   /* misfit energy prefactor (alpha')  [J*Angstrom^2/(mol*e^2)] */
-    double CHB;                     /* hydrogen bond prefactor [J*Angstrom^2/(mol*e^2)] */
-    double CHBT;                    /* hydrogen bond temperature parameter */
-    double SigmaHB;                 /* sigma threshhold for hydrogen bond [e/Angstrom^2] */
-    double Rav;                     /* Averaging Radius for sigma averaging [Angstrom] */
-    double RavCorr;                 /* Averaging Radius to determine sigma correlation [Angstrom]*/
-    double fCorr;                   /* Correction factor for the introduction of sigma correlation to the misfit energy */
+	/* COSMO-RS MODEL PARAMETERS */
+	/* General parameters */
+	double Aeff;                    /* area of effective thermodynamic contact  [Angstrom^2] */
+	double alpha;                   /* misfit energy prefactor (alpha')  [J*Angstrom^2/(mol*e^2)] */
+	double CHB;                     /* hydrogen bond prefactor [J*Angstrom^2/(mol*e^2)] */
+	double CHBT;                    /* hydrogen bond temperature parameter */
+	double SigmaHB;                 /* sigma threshhold for hydrogen bond [e/Angstrom^2] */
+	double Rav;                     /* Averaging Radius for sigma averaging [Angstrom] */
+	double RavCorr;                 /* Averaging Radius to determine sigma correlation [Angstrom]*/
+	double fCorr;                   /* Correction factor for the introduction of sigma correlation to the misfit energy */
 	double comb_SG_A_std;           /* Standard area for Staverman-Guggenheim combinatorial contribution [Angstrom^2] */
 	double comb_SG_z_coord;         /* Coordination number for Staverman Guggenheim contribution */
 	double comb_modSG_exp;			/* Exponent parameter for modified Staverman-Guggenheim contribution with exponential scaling [-] */
@@ -106,6 +107,10 @@ struct parameters {
 	double comb_lambda1;
 	double comb_lambda2;
 
+	/* Parameters used for the dispersion term */
+	double E_F_corr;
+	double m_vdW;
+
 	/* Parameters used for solvation energy calculation */
 	double dGsolv_eta;
 	double dGsolv_omega_ring;
@@ -113,14 +118,14 @@ struct parameters {
 	std::vector<double> dGsolv_E_gas;
 	std::vector<int> dGsolv_numberOfAtomsInRing;
 
-    /* Radii used for cosmo segment scaling for monoatomic ions */
+	/* Radii used for cosmo segment scaling for monoatomic ions */
 	std::vector<double> R_i = std::vector<double>(118, 0.0);                       /* new radii, element specific (r_i[AN]) from the input file*/
 	std::vector<double> R_i_COSMO = std::vector<double>(118, 0.0);                 /* old radii from COSMO-file, element specific (r_i[AN]); */
 
-    /* Experimental parameters */
-    /* These are used to test new modifications to COSMO-RS. Parameters of succesfull modifications should
-    *  later be implemented with standard parameters */
-	std::unordered_map<std::string,double> exp_param;
+	/* Experimental parameters */
+	/* These are used to test new modifications to COSMO-RS. Parameters of succesfull modifications should
+	*  later be implemented with standard parameters */
+	std::unordered_map<std::string, double> exp_param;
 
 	std::vector<int> HBClassElmnt = std::vector<int>(300, 0);
 
@@ -144,24 +149,27 @@ private:
 		std::sort(p.begin(), p.end(),
 			[&](int i, int j) {
 
-			if (SegmentTypeGroup[i] != SegmentTypeGroup[j]) { return SegmentTypeGroup[i] < SegmentTypeGroup[j]; }
+				if (SegmentTypeGroup[i] != SegmentTypeGroup[j]) { return SegmentTypeGroup[i] < SegmentTypeGroup[j]; }
 
-			// if both segments belong to an monoatomic ion, first sort by atomic number
-			if (SegmentTypeGroup[i] == 3 || SegmentTypeGroup[i] == 5) {
+				// if both segments belong to an monoatomic ion, first sort by atomic number
+				if (SegmentTypeGroup[i] == 3 || SegmentTypeGroup[i] == 5) {
+					if (SegmentTypeAtomicNumber[i] != SegmentTypeAtomicNumber[j]) { return SegmentTypeAtomicNumber[i] < SegmentTypeAtomicNumber[j]; }
+				}
+
+				if (SegmentTypeSigma[i] != SegmentTypeSigma[j]) { return SegmentTypeSigma[i] < SegmentTypeSigma[j]; }
+
+				if (SegmentTypeSigmaCorr[i] != SegmentTypeSigmaCorr[j]) { return SegmentTypeSigmaCorr[i] < SegmentTypeSigmaCorr[j]; }
+
+				if (SegmentTypeHBtype[i] != SegmentTypeHBtype[j]) { return SegmentTypeHBtype[i] < SegmentTypeHBtype[j]; }
+
 				if (SegmentTypeAtomicNumber[i] != SegmentTypeAtomicNumber[j]) { return SegmentTypeAtomicNumber[i] < SegmentTypeAtomicNumber[j]; }
-			}
 
-			if (SegmentTypeSigma[i] != SegmentTypeSigma[j]) { return SegmentTypeSigma[i] < SegmentTypeSigma[j]; }
+				if (SegmentTypeAtomicPolariz[i] != SegmentTypeAtomicPolariz[j]) { return SegmentTypeAtomicPolariz[i] < SegmentTypeAtomicPolariz[j]; }
 
-			if (SegmentTypeSigmaCorr[i] != SegmentTypeSigmaCorr[j]) { return SegmentTypeSigmaCorr[i] < SegmentTypeSigmaCorr[j]; }
 
-			if (SegmentTypeHBtype[i] != SegmentTypeHBtype[j]) { return SegmentTypeHBtype[i] < SegmentTypeHBtype[j]; }
+				return i < j;
 
-			if (SegmentTypeAtomicNumber[i] != SegmentTypeAtomicNumber[j]) { return SegmentTypeAtomicNumber[i] < SegmentTypeAtomicNumber[j]; }
-
-			return i < j;
-
-		});
+			});
 		return p;
 	}
 
@@ -177,7 +185,7 @@ public:
 	}
 
 	segmentTypeCollection(int numberOfMolecules) {
-		
+
 		for (int i = 0; i < numberOfMolecules; i++) {
 			SegmentTypeAreasRowTemplate.push_back(0.0);
 		}
@@ -190,6 +198,7 @@ public:
 	std::vector<float> SegmentTypeSigmaCorr;
 	std::vector<unsigned short> SegmentTypeHBtype;
 	std::vector<unsigned short> SegmentTypeAtomicNumber;
+	std::vector<double> SegmentTypeAtomicPolariz;
 
 	void clear() {
 
@@ -199,7 +208,7 @@ public:
 		SegmentTypeSigmaCorr.clear();
 		SegmentTypeHBtype.clear();
 		SegmentTypeAtomicNumber.clear();
-	}
+		SegmentTypeAtomicPolariz.clear();	}
 
 	void reserve(int numberOfSegmentsTypes) {
 
@@ -209,6 +218,8 @@ public:
 		SegmentTypeSigmaCorr.reserve(numberOfSegmentsTypes);
 		SegmentTypeHBtype.reserve(numberOfSegmentsTypes);
 		SegmentTypeAtomicNumber.reserve(numberOfSegmentsTypes);
+		SegmentTypeAtomicPolariz.reserve(numberOfSegmentsTypes);
+
 	}
 
 	void shrink_to_fit() {
@@ -222,13 +233,15 @@ public:
 		SegmentTypeSigmaCorr.shrink_to_fit();
 		SegmentTypeHBtype.shrink_to_fit();
 		SegmentTypeAtomicNumber.shrink_to_fit();
+		SegmentTypeAtomicPolariz.shrink_to_fit();
+
 	}
 
 	size_t size() {
 		return SegmentTypeHBtype.size();
 	}
 
-	void add(unsigned short ind_molecule, unsigned short group, float Sigma, float SigmaCorr, unsigned short HBtype, unsigned short atomicNumber, double Area) {
+	void add(unsigned short ind_molecule, unsigned short group, float Sigma, float SigmaCorr, unsigned short HBtype, unsigned short atomicNumber, double atomicPolariz, double Area) {
 
 		if (Area == 0) {
 			return;
@@ -240,6 +253,7 @@ public:
 				SegmentTypeHBtype[i] == HBtype &&
 				SegmentTypeSigma[i] == Sigma &&
 				SegmentTypeSigmaCorr[i] == SigmaCorr &&
+				SegmentTypeAtomicPolariz[i] == atomicPolariz &&
 				SegmentTypeAtomicNumber[i] == atomicNumber) {
 				index = i;
 				break;
@@ -252,6 +266,7 @@ public:
 			SegmentTypeSigma.push_back(Sigma);
 			SegmentTypeSigmaCorr.push_back(SigmaCorr);
 			SegmentTypeAtomicNumber.push_back(atomicNumber);
+			SegmentTypeAtomicPolariz.push_back(atomicPolariz);
 
 			index = (int)SegmentTypeHBtype.size() - 1;
 			SegmentTypeAreas.push_back(SegmentTypeAreasRowTemplate);
@@ -268,6 +283,7 @@ public:
 		apply_vector_permutation_in_place(SegmentTypeSigmaCorr, p);
 		apply_vector_permutation_in_place(SegmentTypeHBtype, p);
 		apply_vector_permutation_in_place(SegmentTypeAtomicNumber, p);
+		apply_vector_permutation_in_place(SegmentTypeAtomicPolariz, p);
 		apply_vector_permutation_in_place(SegmentTypeAreas, p);
 
 		int temporaryindex = -1;
@@ -325,12 +341,14 @@ struct molecule {
 	// Atoms
 	Eigen::MatrixXd atomPositions;
 	Eigen::VectorXd atomRadii;
+	Eigen::MatrixXd atomPolarizabilityTensors;
 	Eigen::VectorXi atomAtomicNumbers;
 
 	// Segment information directly from the input file
 	Eigen::MatrixXd segmentPositions;
 	Eigen::VectorXi segmentAtomIndices;
 	Eigen::VectorXi segmentAtomicNumber;
+	Eigen::VectorXd segmentAtomicPolariz;
 	Eigen::VectorXi segmentHydrogenBondingType;
 	Eigen::VectorXd segmentAreas;
 	Eigen::VectorXd segmentSigmas;
@@ -344,6 +362,7 @@ struct molecule {
 
 		if (keepDataNeededForReloadingSigmaProfile == false) {
 			segmentAtomicNumber.resize(0);
+			segmentAtomicPolariz.resize(0);
 			segmentPositions.resize(0, 0);
 			segmentHydrogenBondingType.resize(0);
 			segmentAreas.resize(0);
@@ -360,14 +379,14 @@ struct calculation {
 	segmentTypeCollection segments;
 
 	calculation(int numberOfMolecules) : \
-		contactStatistics(NULL, 0, 0, 0),\
+		contactStatistics(NULL, 0, 0, 0), \
 		averageSurfaceEnergies(NULL, 0, 0, 0, 0), \
 		partialMolarEnergies(NULL, 0, 0, 0), \
-		lnGammaCombinatorial(NULL, 0,0), \
+		lnGammaCombinatorial(NULL, 0, 0), \
 		lnGammaResidual(NULL, 0, 0), \
 		lnGammaTotal(NULL, 0, 0), \
 		dGsolv(NULL, 0, 0)
-	
+
 	{
 		segments = segmentTypeCollection(numberOfMolecules);
 	}
@@ -380,7 +399,7 @@ struct calculation {
 	Eigen::MatrixXf segmentGammas;
 	std::vector<std::vector<int>> referenceStateCalculationIndices;
 	std::vector<unsigned short> referenceStateType;
-	
+
 	Eigen::MatrixXd PhiDash_pxi;
 	Eigen::MatrixXd ThetaDash_pxi;
 
@@ -405,7 +424,7 @@ struct calculation {
 	Eigen::Tensor<float, 3, Eigen::RowMajor> partialMolarEnergies_data;
 
 	//holds first and last segment index that are needed for calculations with the COSMOSPACE equation allowing to save calculations
-	std::vector<int> lowerBoundIndexForCOSMOSPACECalculation; 
+	std::vector<int> lowerBoundIndexForCOSMOSPACECalculation;
 	std::vector<int> upperBoundIndexForCOSMOSPACECalculation;
 
 	std::vector<float> temperatures;

@@ -357,6 +357,18 @@ molecule getMoleculeFromORCACOSMOfile(std::string& path) {
         if (segmentIndex != segmentSigmas.size()) {
             throw std::runtime_error("Not enough corrected charges where found parsing the following file: " + path);
         }
+
+    // read polarizability tensor and isotropic polarizabilities
+    newMolecule.atomPolarizabilityTensors = Eigen::MatrixXd::Zero(numberOfAtoms, 6);
+    std::string matchingLine = scan_for(cosmoFile, "#ATOMIC POLARIZABILITIES", "start", 0, false);
+    if (matchingLine != "") {
+        std::getline(cosmoFile, currentLine);
+        std::getline(cosmoFile, currentLine);
+        for (int i = 0; i < numberOfAtoms; i++) {
+            std::getline(cosmoFile, currentLine);
+            parse_line(currentLine, "%*[^:] : %lf %lf %lf %lf %lf %lf", &newMolecule.atomPolarizabilityTensors(i, 0), &newMolecule.atomPolarizabilityTensors(i, 1), &newMolecule.atomPolarizabilityTensors(i, 2), &newMolecule.atomPolarizabilityTensors(i, 3), &newMolecule.atomPolarizabilityTensors(i, 4), &newMolecule.atomPolarizabilityTensors(i, 5));
+        }
+    }
     }
     cosmoFile.close();
 
@@ -371,6 +383,7 @@ molecule getMoleculeFromORCACOSMOfile(std::string& path) {
     newMolecule.atomRadii = Eigen::Map<Eigen::VectorXd>(atomRadii.data(), int(atomRadii.size()));
 
     newMolecule.segmentPositions = Eigen::MatrixXd::Zero(segmentPositions_X.size(), 3);
+
     for (int i = 0; i < segmentPositions_X.size(); i++) {
         newMolecule.segmentPositions(i, 0) = segmentPositions_X[i];
         newMolecule.segmentPositions(i, 1) = segmentPositions_Y[i];
