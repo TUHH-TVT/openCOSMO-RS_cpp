@@ -36,34 +36,37 @@ options = {
     
                                                                   
     # segment descriptor switches
-    'sw_SR_atomicNumber': 0,                                        # [0, 1] : differentiate between atomic numbers
+    'sw_SR_atomicNumber': 1,                                        # [0, 1] : differentiate between atomic numbers
     'sw_SR_misfit': 2,                                              # [0, 1, 2]
                                                                     #       0: do not use misfit correlation
                                                                     #       1 : use misfit correlation on all molecules
                                                                     #       2 : use misfit correlation only on neutral molecules
     'sw_SR_differentiateHydrogens' : 0,                             # [0, 1] : differentiate between hydrogen atoms depending on the heteroatom they are bound to
-    'sw_SR_differentiateMoleculeGroups' : 0,                        # [0, 1] : differentiate between molecule groups
+    'sw_SR_differentiateMoleculeGroups' : 0,  
+    'sw_SR_polarizabilities' : 7                      # [0,1,3,5,6,7,8] : polarizability projections modes. Parametrizations and notations are from https://doi.org/10.1016/j.ces.2025.122170. 1 - Eq.(16)+𝑤1(Eq.(9)), 6 - Eq.(16)+𝑤5(Eq.(11)), 7 - Eq.(24)+𝑤5(Eq.(11)), 8 - Eq.(25)+𝑤5(Eq.(11)).  
 
 }
 
-# parameters
+# parameters (parameters below are the latest parametrization with polarizability projections: Eq.(24)+𝑤5(Eq.(11))) from https://doi.org/10.1016/j.ces.2025.122170. 
 parameters = {
-    'Aeff': 6.25,
+    'Aeff': 4.90825,
     'ln_alpha': 0,
     'ln_CHB': 0,
     'CHBT': 1.5,
-    'SigmaHB': 0.0085,
+    'SigmaHB': 0.009953,
     'Rav': 0.5,
     'RavCorr': 1,
     'fCorr': 2.4,
-    'comb_SG_z_coord': 10,
-    'comb_SG_A_std': 79.53,
+    'comb_SG_z_coord': 0.0,
+    'comb_SG_A_std': 0.0,
     'comb_modSG_exp': 2.0/3.0,
     'comb_lambda0': 0.463,
     'comb_lambda1': 0.42,
     'comb_lambda2': 0.065,
     'comb_SGG_lambda': 0.773,
     'comb_SGG_beta': 0.778,
+    'm_vdW':29.567 ,
+    'E_F_corr':346.82,
 
     'radii': {},
 
