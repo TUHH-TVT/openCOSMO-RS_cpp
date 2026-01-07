@@ -33,16 +33,18 @@ void initializeOnPython() {
 void loadParametersOnPython(py::dict parameters) {
 
 	param.Aeff = parameters["Aeff"].cast<double>();
-	param.alpha = exp(parameters["ln_alpha"].cast<double>());
+	param.alpha = parameters["alpha"].cast<double>();
 
-	param.CHB = exp(parameters["ln_CHB"].cast<double>());
+	param.CHB = parameters["CHB"].cast<double>();
 	param.CHBT = parameters["CHBT"].cast<double>();
 	param.SigmaHB = parameters["SigmaHB"].cast<double>();
 
 	param.Rav = parameters["Rav"].cast<double>();
 
-	param.E_F_corr = parameters["E_F_corr"].cast<double>();
-	param.m_vdW = parameters["m_vdW"].cast<double>();
+	if (param.sw_SR_polarizabilities > 0) {
+		param.E_F_corr = parameters["E_F_corr"].cast<double>();
+		param.m_vdW = parameters["m_vdW"].cast<double>();
+	}
 
 	if (param.sw_misfit > 0) {
 		param.fCorr = parameters["fCorr"].cast<double>();

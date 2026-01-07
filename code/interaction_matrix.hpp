@@ -33,7 +33,7 @@ void calculateInteractionMatrix(segmentTypeCollection& segments, Eigen::MatrixXf
 
     // neutral - neutral interactions -------------------------------------------------------------------------------------------------
     // misfit 
-    double const misfit_prefactor = param.Aeff * param.alpha * 7322000.0 * 0.5;
+    double const misfit_prefactor = param.Aeff * param.alpha * 0.5;
 
 
     std::map<int, double> ioniz_map;;
@@ -42,7 +42,7 @@ void calculateInteractionMatrix(segmentTypeCollection& segments, Eigen::MatrixXf
     // hb
     double CHB_T = 0;
     double buffdb1 = 1.0 - param.CHBT + param.CHBT * (298.15 / (temperature));
-    if (buffdb1 > 0) CHB_T = param.CHB * 43421000.0 * buffdb1;
+    if (buffdb1 > 0) CHB_T = param.CHB * buffdb1;
 
     double const hb_prefactor = param.Aeff * CHB_T;
     double val = 0;
