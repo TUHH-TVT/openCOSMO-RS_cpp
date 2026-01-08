@@ -12,7 +12,7 @@
 #include <cmath>
 #include <map>
 // returns lower left triangular matrices, this is because this way the matrix is accessed in sequential order in memory
-void calculateInteractionMatrix(segmentTypeCollection& segments, Eigen::MatrixXf& A_int, std::vector<Eigen::MatrixXd>& partialInteractionMatrices, parameters& param, float temperature) {
+void calculateInteractionMatrix(segmentTypeCollection& segments, MatrixCalcType& A_int, std::vector<Eigen::MatrixXd>& partialInteractionMatrices, parameters& param, double temperature) {
 
     const int numberOfSegments = int(segments.size());
 
@@ -121,7 +121,7 @@ void calculateInteractionMatrix(segmentTypeCollection& segments, Eigen::MatrixXf
 
             // always j >= i
             val -= vdw_val;
-            A_int(j, i) = (float)val;
+            A_int(j, i) = static_cast<calcType>(val);
         }
     }
 
@@ -131,8 +131,7 @@ void calculateInteractionMatrix(segmentTypeCollection& segments, Eigen::MatrixXf
         for (int i = 0; i < numberOfSegments; i++) {
             for (int j = i + 1; j < numberOfSegments; j++) {
                 // always j >= i + 1
-                A_int(j, i) = A_int(j, i) - 0.5f * (A_int(i, i) + A_int(j, j));
-                display("segment substr");
+                A_int(j, i) = A_int(j, i) - 0.5 * (A_int(i, i) + A_int(j, j));
             }
         }
 

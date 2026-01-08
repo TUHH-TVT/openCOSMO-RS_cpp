@@ -5,23 +5,21 @@
 
 #pragma once
 
-#include "types.hpp"
-
 // this code is not optimized for fast calculation yet
-void calculateContactStatistics(calculation& _calculation, Eigen::MatrixXf& A_int_float, std::vector<Eigen::MatrixXd>& partialInteractionMatrices, Eigen::MatrixXf& Tau_float, float* Gamma, int i_concentration, Eigen::Tensor<float, 4, Eigen::RowMajor>& temporary_averageInteractionEnergies, Eigen::Tensor<float, 3, Eigen::RowMajor>& temporary_partialMolarEnergies, parameters& param) {
+void calculateContactStatistics(calculation& _calculation, MatrixCalcType& A_int_calcType, std::vector<Eigen::MatrixXd>& partialInteractionMatrices, MatrixCalcType& Tau_calcType, calcType* Gamma, int i_concentration, Eigen::Tensor<double, 4, Eigen::RowMajor>& temporary_averageInteractionEnergies, Eigen::Tensor<double, 3, Eigen::RowMajor>& temporary_partialMolarEnergies, parameters& param) {
 
 	/* Calculate contact statistics for all compositions.*/
 	const size_t numberOfComponents = _calculation.components.size();
 	const size_t numberOfSegments = _calculation.segments.size();
 
-	float* x = &(_calculation.concentrations[i_concentration][0]);
+	double* x = &(_calculation.concentrations[i_concentration][0]);
 
 	Eigen::VectorXd X_vector = _calculation.segmentConcentrations(Eigen::seqN(0, numberOfSegments), i_concentration).cast<double>();
-	Eigen::VectorXd x_vector = Eigen::Map<Eigen::VectorXf>(x, numberOfComponents).cast<double>();
-	Eigen::VectorXd gamma_vector = Eigen::Map<Eigen::VectorXf>(Gamma, numberOfSegments).cast<double>();
+	Eigen::VectorXd x_vector = Eigen::Map<Eigen::VectorXd>(x, numberOfComponents).cast<double>();
+	Eigen::VectorXd gamma_vector = Eigen::Map<VectorCalcType>(Gamma, numberOfSegments).cast<double>();
 
-	Eigen::ArrayXXd Tau = Tau_float(Eigen::seqN(0, numberOfSegments), Eigen::seqN(0, numberOfSegments)).cast<double>();
-	Eigen::ArrayXXd A_int = A_int_float(Eigen::seqN(0, numberOfSegments), Eigen::seqN(0, numberOfSegments)).cast<double>();
+	Eigen::ArrayXXd Tau = Tau_calcType(Eigen::seqN(0, numberOfSegments), Eigen::seqN(0, numberOfSegments)).cast<double>();
+	Eigen::ArrayXXd A_int = A_int_calcType(Eigen::seqN(0, numberOfSegments), Eigen::seqN(0, numberOfSegments)).cast<double>();
 
 	double div_Aeff = 1 / param.Aeff;
 
@@ -84,18 +82,18 @@ void calculateContactStatistics(calculation& _calculation, Eigen::MatrixXf& A_in
 		Eigen::HouseholderQR<Eigen::MatrixXd> decomposition = A.householderQr();
 		Eigen::MatrixXd ndGamma_dni(numberOfSegments, numberOfComponents);
 
-#if defined(DEBUG_INFO)
+#if defined(PRINT_DEBUG_INFO)
 		double relativeError = 0;
 #endif
 		for (int mol_i = 0; mol_i < numberOfComponents; mol_i++) {
 			ndGamma_dni(Eigen::indexing::all, mol_i) = decomposition.solve(b(Eigen::indexing::all, mol_i));
 
-#if defined(DEBUG_INFO)
+#if defined(PRINT_DEBUG_INFO)
 			relativeError = std::max(relativeError, (A * ndGamma_dni(Eigen::indexing::all, 0) - b(Eigen::indexing::all, 0)).norm() / b(Eigen::indexing::all, 0).norm());
 #endif
 		}
 
-#if defined(DEBUG_INFO)
+#if defined(PRINT_DEBUG_INFO)
 		if (relativeError > 10e-14) {
 			throw std::runtime_error("When calculating ndGamma_dni the equation system was not solved correctly.");
 		}

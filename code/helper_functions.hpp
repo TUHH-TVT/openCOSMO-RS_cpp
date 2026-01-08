@@ -5,8 +5,9 @@
 
 
 #pragma once
-#include "types.hpp"
+#include "general.hpp"
 #include <fstream>
+#include <iomanip>
 
 std::function<void(std::string)> display;
 std::function<void(std::string, unsigned long)> displayTime;
@@ -90,74 +91,97 @@ std::string convertPointerToString(T* pointer) {
 }
 
 template <typename T>
-void Write1DArraytoFile(std::string Path, T* Array_ptr, int N_rows, int N_cols, bool transpose = false, int print_to_row_N = -1, int print_to_col_N = -1, int n_repeat = 1) {
+void Write1DArrayToFile(std::string path, const T* array_ptr, int n_rows, int n_cols,
+	bool transpose = false, int print_to_row_n = -1, int print_to_col_n = -1,
+	int n_repeat = 1) {
 
-	if (print_to_row_N == -1) {
-		print_to_row_N = N_rows;
+	// Adjust print_to_row_n and print_to_col_n if they are not provided
+	if (print_to_row_n == -1) {
+		print_to_row_n = n_rows;
 	}
-	if (print_to_col_N == -1) {
-		print_to_col_N = N_cols;
-	}
-
-	FILE* fp = NULL;
-	fp = fopen(Path.c_str(), "w");
-	if (fp == NULL) {
-		throw std::runtime_error("Could not open file: " + Path);
+	if (print_to_col_n == -1) {
+		print_to_col_n = n_cols;
 	}
 
+	// Open file using RAII (std::ofstream)
+	std::ofstream file(path.data());
+	if (!file) {
+		throw std::runtime_error("Could not open file: " + std::string(path));
+	}
+
+	// Set formatting options: fixed point, 6 decimal precision
+	file << std::fixed << std::setprecision(6);
+
+	// Loop through the data, handling transposition if needed
 	if (transpose) {
-		for (int h = 0; h < n_repeat; h++) {
-			for (int i = 0; i < print_to_col_N; i++) {
-				for (int j = 0; j < print_to_row_N; j++) {
-					fprintf(fp, "%14.6e  ", Array_ptr[j * N_cols + i]);
+		for (int h = 0; h < n_repeat; ++h) {
+			for (int i = 0; i < print_to_col_n; ++i) {
+				for (int j = 0; j < print_to_row_n; ++j) {
+					file << std::setw(14) << array_ptr[j * n_cols + i] << "  ";
 				}
-				fprintf(fp, "\n");
+				file << "\n";
 			}
 		}
 	}
 	else {
-		for (int h = 0; h < n_repeat; h++) {
-			for (int i = 0; i < print_to_row_N; i++) {
-				for (int j = 0; j < print_to_col_N; j++) {
-					fprintf(fp, "%14.6e  ", Array_ptr[i * N_cols + j]);
+		for (int h = 0; h < n_repeat; ++h) {
+			for (int i = 0; i < print_to_row_n; ++i) {
+				for (int j = 0; j < print_to_col_n; ++j) {
+					file << std::setw(14) << array_ptr[i * n_cols + j] << "  ";
 				}
-				fprintf(fp, "\n");
+				file << "\n";
 			}
 		}
 	}
 
-	fclose(fp);
+	// Check if any errors occurred during writing
+	if (!file) {
+		throw std::runtime_error("Error occurred while writing to file: " + std::string(path));
+	}
 }
 
-void WriteEigenMatrixtoFile(std::string Path, Eigen::MatrixXd m) {
-	FILE* fp = NULL;
-	fp = fopen(Path.c_str(), "w");
-	if (fp == NULL) {
-		throw std::runtime_error("Could not open file: " + Path);
+void WriteEigenMatrixToFile(std::string path, const Eigen::MatrixXd& m) {
+	std::ofstream file(path.data());
+	if (!file) {
+		throw std::runtime_error("Could not open file: " + std::string(path));
 	}
 
-	for (int i = 0; i < m.rows(); i++) {
-		for (int j = 0; j < m.cols(); j++) {
-			fprintf(fp, "%.6e ", m(i, j));
+	file.precision(6);  // Set precision to 6 digits
+	file << std::scientific;  // Use scientific notation
+
+	for (int i = 0; i < m.rows(); ++i) {
+		for (int j = 0; j < m.cols(); ++j) {
+			file << m(i, j) << " ";
 		}
-		fprintf(fp, "\n");
+		file << "\n";
 	}
 
-	fclose(fp);
+	if (!file) {
+		throw std::runtime_error("Error occurred while writing to file: " + std::string(path));
+	}
 }
 
-void WriteExtendedSigmaProfiletoFile(std::string Path, segmentTypeCollection& segments) {
+void WriteExtendedSigmaProfileToFile(std::string path, segmentTypeCollection& segments) {
 
-	FILE* fp = NULL;
-	fp = fopen(Path.c_str(), "w");
-	if (fp == NULL) {
-		throw std::runtime_error("Could not open file: " + Path);
+	std::ofstream file(path.data());
+	if (!file) {
+		throw std::runtime_error("Could not open file: " + std::string(path));
 	}
 
-	for (int i = 0; i < segments.size(); i++) {
-		fprintf(fp, "%4d  %14.6e  %14.6e  %4d  %3d  %3d  %14.6e\n", i, segments.SegmentTypeSigma[i], segments.SegmentTypeSigmaCorr[i], segments.SegmentTypeAtomicNumber[i], \
-			segments.SegmentTypeHBtype[i], segments.SegmentTypeGroup[i], segments.SegmentTypeAreas[i][0]);
+	file << std::fixed << std::setprecision(6);
+
+	// Write segment data to file
+	for (int i = 0; i < segments.size(); ++i) {
+		file << std::setw(4) << i << "  "
+			<< std::setw(14) << segments.SegmentTypeSigma[i] << "  "
+			<< std::setw(14) << segments.SegmentTypeSigmaCorr[i] << "  "
+			<< std::setw(4) << segments.SegmentTypeAtomicNumber[i] << "  "
+			<< std::setw(3) << segments.SegmentTypeHBtype[i] << "  "
+			<< std::setw(3) << segments.SegmentTypeGroup[i] << "  "
+			<< std::setw(14) << segments.SegmentTypeAreas[i][0] << "\n";
 	}
 
-	fclose(fp);
+	if (!file) {
+		throw std::runtime_error("Error occurred while writing to file: " + std::string(path));
+	}
 }

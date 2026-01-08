@@ -23,7 +23,7 @@ void initializeOnCLI() {
     display = displayOnCLI;
     displayTime = displayTimeOnCLI;
 
-    initialize(param, false);
+    initialize(param, true);
     param.sw_dGsolv_calculation_strict = 0;
     warnings = std::vector<std::string>();
     n_ex = 3;
@@ -63,6 +63,10 @@ void loadParametersOnCLI(const json& parameters) {
     if (param.sw_combTerm == 4) {
         param.comb_SGG_lambda = parameters["comb_SGG_lambda"].template get<double>();
         param.comb_SGG_beta = parameters["comb_SGG_beta"].template get<double>();
+    }
+
+    if (parameters.contains("sw_COSMOfiles_type")) {
+        param.sw_COSMOfiles_type = parameters["sw_COSMOfiles_type"].template get<std::string>();
     }
 
     if (parameters.contains("dGsolv_eta")) {
@@ -134,6 +138,10 @@ void loadCalculationsOnCLI(const json& calculationsOnCLI) {
         throw std::runtime_error("Please specify at least one calculation.");
     }
 
+    // important as otherwise the data behind Eigen::Maps
+    // can be lost when the vector is resized.
+    calculations.reserve(numCalcs);
+
     for (int i = 0; i < numCalcs; i++) {
 
         const json& calculationDict = calculationsOnCLI[i];
@@ -167,11 +175,11 @@ void loadCalculationsOnCLI(const json& calculationsOnCLI) {
         auto concentrations = calculationDict["concentrations"].template get<std::vector<std::vector<double>>>();
 
         for (int j = 0; j < concentrations.size(); j++) {
-            std::vector<float> rowConcentration;
+            std::vector<double> rowConcentration;
 
-            float tempSumOfConcentrations = 0;
+            double tempSumOfConcentrations = 0;
             for (int k = 0; k < numberOfComponents; k++) {
-                float val = static_cast<float>(concentrations[j][k]);
+                double val = static_cast<double>(concentrations[j][k]);
                 tempSumOfConcentrations += val;
                 rowConcentration.push_back(val);
             }
@@ -180,7 +188,7 @@ void loadCalculationsOnCLI(const json& calculationsOnCLI) {
                 throw std::runtime_error("For calculation number " + std::to_string(i) + ", the concentrations do not add up to unity. residual concentration: " + std::to_string(abs(1.0f - tempSumOfConcentrations)));
             }
 
-            float temperature = static_cast<float>(temperatures[j]);
+            double temperature = static_cast<double>(temperatures[j]);
 
             newCalculation.temperatures.push_back(temperature);
             newCalculation.concentrations.push_back(rowConcentration);
@@ -204,10 +212,10 @@ void loadCalculationsOnCLI(const json& calculationsOnCLI) {
 
             newCalculation.referenceStateType.push_back(static_cast<unsigned short>(referenceStateType));
 
-            float tempSumOfConcentrations = 0;
+            double tempSumOfConcentrations = 0;
             if (calculationDict.contains("reference_state_concentrations")) {
                 for (int k = 0; k < referenceStateConcentrations[j].size(); k++) {
-                    tempSumOfConcentrations += static_cast<float>(referenceStateConcentrations[j][k]);
+                    tempSumOfConcentrations += static_cast<double>(referenceStateConcentrations[j][k]);
                 }
             }
 
@@ -218,12 +226,12 @@ void loadCalculationsOnCLI(const json& calculationsOnCLI) {
 
                 std::vector<int> thisReferenceStateCalculationIndices;
                 for (int k = 0; k < numberOfComponents; k++) {
-                    std::vector<float> referenceStateConcentration;
+                    std::vector<double> referenceStateConcentration;
                     for (int m = 0; m < numberOfComponents; m++) {
                         referenceStateConcentration.push_back(k == m ? 1.0f : 0.0f);
                     }
 
-                    float temperature = static_cast<float>(temperatures[j]);
+                    double temperature = static_cast<double>(temperatures[j]);
                     int referenceStateCalculationIndex = static_cast<int>(newCalculation.addOrFindArrayIndexForConcentration(referenceStateConcentration, temperature));
                     thisReferenceStateCalculationIndices.push_back(referenceStateCalculationIndex);
                 }
@@ -237,12 +245,12 @@ void loadCalculationsOnCLI(const json& calculationsOnCLI) {
                 std::vector<int> thisReferenceStateCalculationIndices;
                 for (int k = 0; k < numberOfComponents; k++) {
                     if (newCalculation.components[k]->moleculeCharge == 0) {
-                        std::vector<float> referenceStateConcentration;
+                        std::vector<double> referenceStateConcentration;
                         for (int m = 0; m < numberOfComponents; m++) {
                             referenceStateConcentration.push_back(k == m ? 1.0f : 0.0f);
                         }
 
-                        float temperature = static_cast<float>(temperatures[j]);
+                        double temperature = static_cast<double>(temperatures[j]);
                         int referenceStateCalculationIndex = static_cast<int>(newCalculation.addOrFindArrayIndexForConcentration(referenceStateConcentration, temperature));
                         thisReferenceStateCalculationIndices.push_back(referenceStateCalculationIndex);
                     }
@@ -253,9 +261,9 @@ void loadCalculationsOnCLI(const json& calculationsOnCLI) {
                 newCalculation.referenceStateCalculationIndices.push_back(thisReferenceStateCalculationIndices);
             }
             else if (referenceStateType == 2) { // Reference mixture
-                std::vector<float> referenceStateConcentration;
+                std::vector<double> referenceStateConcentration;
                 for (int m = 0; m < numberOfComponents; m++) {
-                    referenceStateConcentration.push_back(static_cast<float>(referenceStateConcentrations[j][m]));
+                    referenceStateConcentration.push_back(static_cast<double>(referenceStateConcentrations[j][m]));
                 }
 
                 if (referenceStateConcentrations[j].size() != newCalculation.components.size()) {
@@ -266,7 +274,7 @@ void loadCalculationsOnCLI(const json& calculationsOnCLI) {
                     throw std::runtime_error("For calculation number " + std::to_string(i) + ", the reference concentrations do not add up to unity. residual concentration: " + std::to_string(abs(1.0f - tempSumOfConcentrations)));
                 }
 
-                float temperature = static_cast<float>(temperatures[j]);
+                double temperature = static_cast<double>(temperatures[j]);
                 int referenceStateCalculationIndex = static_cast<int>(newCalculation.addOrFindArrayIndexForConcentration(referenceStateConcentration, temperature));
 
                 std::vector<int> thisReferenceStateCalculationIndices;
@@ -290,66 +298,66 @@ void loadCalculationsOnCLI(const json& calculationsOnCLI) {
 
         // bind to matrices for it to work with the rest o the code
 
-        newCalculation.lnGammaCombinatorial_data = Eigen::MatrixXf(
+        newCalculation.lnGammaCombinatorial_data = Eigen::MatrixXd(
             int(newCalculation.originalNumberOfCalculations),
             int(newCalculation.components.size()));
 
         newCalculation.lnGammaCombinatorial_data.setZero();
 
-        new (&newCalculation.lnGammaCombinatorial) Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>>(
+        new (&newCalculation.lnGammaCombinatorial) Eigen::Map<Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>>(
             newCalculation.lnGammaCombinatorial_data.data(),
             int(newCalculation.originalNumberOfCalculations),
             int(newCalculation.components.size()));
 
-        newCalculation.lnGammaResidual_data = Eigen::MatrixXf(
+        newCalculation.lnGammaResidual_data = Eigen::MatrixXd(
             int(newCalculation.originalNumberOfCalculations),
             int(newCalculation.components.size()));
 
         newCalculation.lnGammaResidual_data.setZero();
 
-        new (&newCalculation.lnGammaResidual) Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>>(
+        new (&newCalculation.lnGammaResidual) Eigen::Map<Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>>(
             newCalculation.lnGammaResidual_data.data(),
             int(newCalculation.originalNumberOfCalculations),
             int(newCalculation.components.size()));
 
-        newCalculation.lnGammaTotal_data = Eigen::MatrixXf(
+        newCalculation.lnGammaTotal_data = Eigen::MatrixXd(
             int(newCalculation.originalNumberOfCalculations),
             int(newCalculation.components.size()));
 
         newCalculation.lnGammaTotal_data.setZero();
 
-        new (&newCalculation.lnGammaTotal) Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>>(
+        new (&newCalculation.lnGammaTotal) Eigen::Map<Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>>(
             newCalculation.lnGammaTotal_data.data(),
             int(newCalculation.originalNumberOfCalculations),
             int(newCalculation.components.size()));
 
-        newCalculation.dGsolv_data = Eigen::MatrixXf(
+        newCalculation.dGsolv_data = Eigen::MatrixXd(
             int(newCalculation.originalNumberOfCalculations),
             int(newCalculation.components.size()));
 
         newCalculation.dGsolv_data.setZero();
 
-        new (&newCalculation.dGsolv) Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>>(
+        new (&newCalculation.dGsolv) Eigen::Map<Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>>(
             newCalculation.dGsolv_data.data(),
             int(newCalculation.originalNumberOfCalculations),
             int(newCalculation.components.size()));
 
         if (param.sw_calculateContactStatisticsAndAdditionalProperties > 0) {
 
-            newCalculation.contactStatistics_data = Eigen::Tensor<float, 3, Eigen::RowMajor>(
+            newCalculation.contactStatistics_data = Eigen::Tensor<double, 3, Eigen::RowMajor>(
                 int(newCalculation.originalNumberOfCalculations),
                 int(newCalculation.components.size()),
                 int(newCalculation.components.size()));
 
             newCalculation.contactStatistics_data.setZero();
 
-            new (&newCalculation.contactStatistics) Eigen::TensorMap<Eigen::Tensor<float, 3, Eigen::RowMajor>>(newCalculation.contactStatistics_data.data(),
+            new (&newCalculation.contactStatistics) Eigen::TensorMap<Eigen::Tensor<double, 3, Eigen::RowMajor>>(newCalculation.contactStatistics_data.data(),
                 int(newCalculation.originalNumberOfCalculations),
                 int(newCalculation.components.size()),
                 int(newCalculation.components.size()));
 
 
-            newCalculation.averageSurfaceEnergies_data = Eigen::Tensor<float, 4, Eigen::RowMajor>(
+            newCalculation.averageSurfaceEnergies_data = Eigen::Tensor<double, 4, Eigen::RowMajor>(
                 int(newCalculation.originalNumberOfCalculations),
                 int(param.numberOfPartialInteractionMatrices) + 1, // +1 because A_int is the first one
                 int(newCalculation.components.size()),
@@ -357,7 +365,7 @@ void loadCalculationsOnCLI(const json& calculationsOnCLI) {
 
             newCalculation.averageSurfaceEnergies_data.setZero();
 
-            new (&newCalculation.averageSurfaceEnergies) Eigen::TensorMap<Eigen::Tensor<float, 4, Eigen::RowMajor>>(newCalculation.averageSurfaceEnergies_data.data(),
+            new (&newCalculation.averageSurfaceEnergies) Eigen::TensorMap<Eigen::Tensor<double, 4, Eigen::RowMajor>>(newCalculation.averageSurfaceEnergies_data.data(),
                 int(newCalculation.originalNumberOfCalculations),
                 int(param.numberOfPartialInteractionMatrices) + 1, // +1 because A_int is the first one
                 int(newCalculation.components.size()),
@@ -365,14 +373,14 @@ void loadCalculationsOnCLI(const json& calculationsOnCLI) {
 
             if (param.sw_calculateContactStatisticsAndAdditionalProperties == 2) {
 
-                newCalculation.partialMolarEnergies_data = Eigen::Tensor<float, 3, Eigen::RowMajor>(
+                newCalculation.partialMolarEnergies_data = Eigen::Tensor<double, 3, Eigen::RowMajor>(
                     int(newCalculation.originalNumberOfCalculations),
                     int(param.numberOfPartialInteractionMatrices) + 1, // +1 because A_int is the first one
                     int(newCalculation.components.size()));
 
                 newCalculation.partialMolarEnergies_data.setZero();
 
-                new (&newCalculation.partialMolarEnergies) Eigen::TensorMap<Eigen::Tensor<float, 3, Eigen::RowMajor>>(newCalculation.partialMolarEnergies_data.data(),
+                new (&newCalculation.partialMolarEnergies) Eigen::TensorMap<Eigen::Tensor<double, 3, Eigen::RowMajor>>(newCalculation.partialMolarEnergies_data.data(),
                     int(newCalculation.originalNumberOfCalculations),
                     int(param.numberOfPartialInteractionMatrices) + 1, // +1 because A_int is the first one
                     int(newCalculation.components.size()));
@@ -429,9 +437,9 @@ int main(int argc, char** argv)
 
         std::vector<int> calculationIndices = {};
 
-        for (int i = 0; i < inputFileData["calculations"].size(); i++)
+        for (int i = 0; i < inputFileData["calculations"].size(); i++){
             calculationIndices.push_back(i);
-
+        }
         calculate(calculationIndices);
 
         json outputJson = json::object();
@@ -451,7 +459,7 @@ int main(int argc, char** argv)
         for (int calculationIndex = 0; calculationIndex < inputFileData["calculations"].size(); calculationIndex++) {
             json dGsolv_thisCalculation;
             for (int i = 0; i < calculations[calculationIndex].lnGammaTotal.rows(); i++) {
-                std::vector<float> dGsolv;
+                std::vector<double> dGsolv;
                 for (int j = 0; j < calculations[calculationIndex].lnGammaTotal.cols(); j++) {
                     dGsolv.push_back(calculations[calculationIndex].dGsolv(i, j));
                 }

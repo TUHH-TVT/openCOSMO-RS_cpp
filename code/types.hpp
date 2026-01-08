@@ -1,6 +1,6 @@
 /*
-	c++ implementation of openCOSMO-RS including multiple segment descriptors
-	@author: Simon Mueller, 2022
+    c++ implementation of openCOSMO-RS including multiple segment descriptors
+    @author: Simon Mueller, 2022
 */
 
 
@@ -14,6 +14,7 @@
 #include <memory>
 #include <algorithm>
 #include <mutex>
+
 
 // always include this as at least SSE3 is required
 #include <immintrin.h>
@@ -155,15 +156,15 @@ void apply_vector_permutation_in_place(std::vector<T>& vec, const std::vector<in
 
 struct parameters {
 
-	/* General switches */
-	int sw_misfit = 0;              /* switch: "0" to use misfit contribution without accounting for sigma correlation.
-										   "1" to account for sigma correlation in misfit contribution
+    /* General switches */
+    int sw_misfit = 2;              /* switch: "0" to use misfit contribution without accounting for sigma correlation. 
+                                           "1" to account for sigma correlation in misfit contribution 
 										   "2" to account for sigma correlation in misfit contribution except for ions */
 
 	int sw_useSegmentReferenceStateForInteractionMatrix = 0;		/* switch: "0" Set segment reference state to pure segment (COSMO-RS default) (segment reference state cancels if molecular refstate calculated)
 																	   "1" Set segment reference state to conductor (segment reference state cancels if molecular refstate calculated) */
 
-	int sw_combTerm = 1;            /* switch:  "0" No combinatorial term
+   	int sw_combTerm = 1;            /* switch:  "0" No combinatorial term
 											"1" to use the combinatorial term by Staverman-Guggenheim
 											"2" to use the combinatorial term by Klamt (2003)
 											"3" to use modified Staverman-Guggenheim combinatorial term with exponential scaling */
@@ -177,7 +178,7 @@ struct parameters {
 	std::string sw_COSMOfiles_type = "ORCA_COSMO_TZVPD"; // Type of COSMOfile used, this is used to know which function to use to load the sigma profile. e.g. Turbomole
 
 	int sw_calculateContactStatisticsAndAdditionalProperties = 0;		/* switch:  "0" Do not calculate contact statistics
-																				"1" Calculate contact statistics
+																				"1" Calculate contact statistics 
 																				"2" Calculate contact statistics, partial molar properties and average surface energies*/
 	int numberOfPartialInteractionMatrices;
 
@@ -194,16 +195,16 @@ struct parameters {
 
 	int sw_dGsolv_calculation_strict = 1; // 0Allows calculation of solvation free energies also for atoms that have not been parameterized, but gives a warning
 										  // 1: Allows calculation of solvation free energies if all parameters are available
-	/* COSMO-RS MODEL PARAMETERS */
-	/* General parameters */
-	double Aeff;                    /* area of effective thermodynamic contact  [Angstrom^2] */
-	double alpha;                   /* misfit energy prefactor (alpha')  [J*Angstrom^2/(mol*e^2)] */
-	double CHB;                     /* hydrogen bond prefactor [J*Angstrom^2/(mol*e^2)] */
-	double CHBT;                    /* hydrogen bond temperature parameter */
-	double SigmaHB;                 /* sigma threshhold for hydrogen bond [e/Angstrom^2] */
-	double Rav;                     /* Averaging Radius for sigma averaging [Angstrom] */
-	double RavCorr;                 /* Averaging Radius to determine sigma correlation [Angstrom]*/
-	double fCorr;                   /* Correction factor for the introduction of sigma correlation to the misfit energy */
+    /* COSMO-RS MODEL PARAMETERS */
+    /* General parameters */
+    double Aeff;                    /* area of effective thermodynamic contact  [Angstrom^2] */
+    double alpha;                   /* misfit energy prefactor (alpha')  [J*Angstrom^2/(mol*e^2)] */
+    double CHB;                     /* hydrogen bond prefactor [J*Angstrom^2/(mol*e^2)] */
+    double CHBT;                    /* hydrogen bond temperature parameter */
+    double SigmaHB;                 /* sigma threshhold for hydrogen bond [e/Angstrom^2] */
+    double Rav;                     /* Averaging Radius for sigma averaging [Angstrom] */
+    double RavCorr;                 /* Averaging Radius to determine sigma correlation [Angstrom]*/
+    double fCorr;                   /* Correction factor for the introduction of sigma correlation to the misfit energy */
 	double comb_SG_A_std;           /* Standard area for Staverman-Guggenheim combinatorial contribution [Angstrom^2] */
 	double comb_SG_z_coord;         /* Coordination number for Staverman Guggenheim contribution */
 	double comb_modSG_exp;			/* Exponent parameter for modified Staverman-Guggenheim contribution with exponential scaling [-] */
@@ -225,14 +226,14 @@ struct parameters {
 	std::vector<double> dGsolv_E_gas;
 	std::vector<int> dGsolv_numberOfAtomsInRing;
 
-	/* Radii used for cosmo segment scaling for monoatomic ions */
+    /* Radii used for cosmo segment scaling for monoatomic ions */
 	std::vector<double> R_i = std::vector<double>(118, 0.0);                       /* new radii, element specific (r_i[AN]) from the input file*/
 	std::vector<double> R_i_COSMO = std::vector<double>(118, 0.0);                 /* old radii from COSMO-file, element specific (r_i[AN]); */
 
-	/* Experimental parameters */
-	/* These are used to test new modifications to COSMO-RS. Parameters of succesfull modifications should
-	*  later be implemented with standard parameters */
-	std::unordered_map<std::string, double> exp_param;
+    /* Experimental parameters */
+    /* These are used to test new modifications to COSMO-RS. Parameters of succesfull modifications should
+    *  later be implemented with standard parameters */
+	std::unordered_map<std::string,double> exp_param;
 
 	std::vector<int> HBClassElmnt = std::vector<int>(300, 0);
 
@@ -301,8 +302,8 @@ public:
 
 	std::vector<std::vector<double>> SegmentTypeAreas;
 	std::vector<unsigned short> SegmentTypeGroup;
-	std::vector<float> SegmentTypeSigma;
-	std::vector<float> SegmentTypeSigmaCorr;
+	std::vector<double> SegmentTypeSigma;
+	std::vector<double> SegmentTypeSigmaCorr;
 	std::vector<unsigned short> SegmentTypeHBtype;
 	std::vector<unsigned short> SegmentTypeAtomicNumber;
 	std::vector<double> SegmentTypeAtomicPolariz;
@@ -348,7 +349,7 @@ public:
 		return SegmentTypeHBtype.size();
 	}
 
-	void add(unsigned short ind_molecule, unsigned short group, float Sigma, float SigmaCorr, unsigned short HBtype, unsigned short atomicNumber, double atomicPolariz, double Area) {
+	void add(unsigned short ind_molecule, unsigned short group, double Sigma, double SigmaCorr, unsigned short HBtype, unsigned short atomicNumber, double atomicPolariz, double Area) {
 
 		if (Area == 0) {
 			return;
@@ -501,49 +502,49 @@ struct calculation {
 	std::vector<std::shared_ptr<molecule>> components;
 
 
-	std::vector<std::vector<float>> concentrations;
-	Eigen::MatrixXf segmentConcentrations;
-	Eigen::MatrixXf segmentGammas;
+	std::vector<std::vector<double>> concentrations;
+	MatrixCalcType segmentConcentrations;
+	MatrixCalcType segmentGammas;
 	std::vector<std::vector<int>> referenceStateCalculationIndices;
 	std::vector<unsigned short> referenceStateType;
-
+	
 	Eigen::MatrixXd PhiDash_pxi;
 	Eigen::MatrixXd ThetaDash_pxi;
 
-	Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> lnGammaCombinatorial;
-	Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> lnGammaResidual;
-	Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> lnGammaTotal;
-	Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> dGsolv;
+	Eigen::Map<Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> lnGammaCombinatorial;
+	Eigen::Map<Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> lnGammaResidual;
+	Eigen::Map<Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> lnGammaTotal;
+	Eigen::Map<Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> dGsolv;
 
-	Eigen::TensorMap<Eigen::Tensor<float, 3, Eigen::RowMajor>> contactStatistics;
-	Eigen::TensorMap<Eigen::Tensor<float, 4, Eigen::RowMajor>> averageSurfaceEnergies;
-	Eigen::TensorMap<Eigen::Tensor<float, 3, Eigen::RowMajor>> partialMolarEnergies;
+	Eigen::TensorMap<Eigen::Tensor<double, 3, Eigen::RowMajor>> contactStatistics;
+	Eigen::TensorMap<Eigen::Tensor<double, 4, Eigen::RowMajor>> averageSurfaceEnergies;
+	Eigen::TensorMap<Eigen::Tensor<double, 3, Eigen::RowMajor>> partialMolarEnergies;
 
 	// the following matrices are to save the computations temporarily if needed
 	// for internal use. Access is through the respective maps above.
-	Eigen::MatrixXf lnGammaCombinatorial_data;
-	Eigen::MatrixXf lnGammaResidual_data;
-	Eigen::MatrixXf lnGammaTotal_data;
-	Eigen::MatrixXf dGsolv_data;
+	Eigen::MatrixXd lnGammaCombinatorial_data;
+	Eigen::MatrixXd lnGammaResidual_data;
+	Eigen::MatrixXd lnGammaTotal_data;
+	Eigen::MatrixXd dGsolv_data;
 
-	Eigen::Tensor<float, 3, Eigen::RowMajor> contactStatistics_data;
-	Eigen::Tensor<float, 4, Eigen::RowMajor> averageSurfaceEnergies_data;
-	Eigen::Tensor<float, 3, Eigen::RowMajor> partialMolarEnergies_data;
+	Eigen::Tensor<double, 3, Eigen::RowMajor> contactStatistics_data;
+	Eigen::Tensor<double, 4, Eigen::RowMajor> averageSurfaceEnergies_data;
+	Eigen::Tensor<double, 3, Eigen::RowMajor> partialMolarEnergies_data;
 
 	//holds first and last segment index that are needed for calculations with the COSMOSPACE equation allowing to save calculations
-	std::vector<int> lowerBoundIndexForCOSMOSPACECalculation;
+	std::vector<int> lowerBoundIndexForCOSMOSPACECalculation; 
 	std::vector<int> upperBoundIndexForCOSMOSPACECalculation;
 
-	std::vector<float> temperatures;
+	std::vector<double> temperatures;
 
 	std::vector<std::vector<int>> TauConcentrationIndices;
-	std::vector<float> TauTemperatures;
+	std::vector<double> TauTemperatures;
 
 	std::vector<int> actualConcentrationIndices;
 
 	size_t originalNumberOfCalculations;
 
-	int addOrFindTauIndexForConditions(float temperature) {
+	int addOrFindTauIndexForConditions(double temperature) {
 
 		int index = -1;
 
@@ -565,7 +566,7 @@ struct calculation {
 		return index;
 	}
 
-	int addOrFindArrayIndexForConcentration(std::vector<float> concentration, float temperature)
+	int addOrFindArrayIndexForConcentration(std::vector<double> concentration, double temperature)
 	{
 		int index = -1;
 		int nConditions = 1; // only temperature

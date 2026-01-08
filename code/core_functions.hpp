@@ -5,7 +5,6 @@
 
 
 #pragma once
-
 #include "interaction_matrix.hpp"
 #include "contact_statistics.hpp"
 #include "COSMOfile_functions.hpp"
@@ -45,7 +44,7 @@ void startCalculationMeasurement() {
 
 void stopCalculationMeasurement() {
 
-    oneIteration_total_ms += std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::high_resolution_clock::now() - oneIteration_last).count();
+    oneIteration_total_ms += (const unsigned long)(std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::high_resolution_clock::now() - oneIteration_last).count());
 
     // print accumulated times
     displayTime("rescaleSegments_total_ms               ", rescaleSegments_total_ms);
@@ -63,7 +62,7 @@ void stopCalculationMeasurement() {
 }
 #endif
 
-float hsum_ps_sse3(__m128 v) {
+inline float hsum_ps_sse3(__m128 v) {
     __m128 shuf = _mm_movehdup_ps(v);
     __m128 sums = _mm_add_ps(v, shuf);
     shuf = _mm_movehl_ps(shuf, sums);
@@ -71,65 +70,83 @@ float hsum_ps_sse3(__m128 v) {
     return _mm_cvtss_f32(sums);
 }
 
+inline double hsum_pd_sse3(__m128d v) {
+    __m128d shuf = _mm_shuffle_pd(v, v, 0x1);
+    __m128d sums = _mm_add_pd(v, shuf);
+    return _mm_cvtsd_f64(sums);
+}
+
 #if defined(__AVX__) || defined(__FMA__)
-float hsum256_ps_avx(__m256 v) {
+inline float hsum256_ps_avx(__m256 v) {
     __m128 vlow = _mm256_castps256_ps128(v);
     __m128 vhigh = _mm256_extractf128_ps(v, 1);
     vlow = _mm_add_ps(vlow, vhigh);
     return hsum_ps_sse3(vlow);
 }
+inline double hsum256_pd_avx(__m256d v) {
+    __m128d vlow = _mm256_castpd256_pd128(v);
+    __m128d vhigh = _mm256_extractf128_pd(v, 1);
+    vlow = _mm_add_pd(vlow, vhigh);
+    return hsum_pd_sse3(vlow);
+}
 #endif
 
-void initialize(parameters& param, bool showBinarySpecs = true) {
+void initialize(parameters& param, bool initializeParameters = true, bool initializeMolecules = true, bool initializeCalculations = true, bool showBinarySpecs = true) {
 
-    n_ex = 0;
-    molecules.clear();
-    calculations.clear();
 
-    param.ChargeRaster.clear();
-    param.exp_param.clear();
-    param.R_i = std::vector<double>(118, 0.0);
-    param.R_i_COSMO = std::vector<double>(118, 0.0);
-    param.HBClassElmnt = std::vector<int>(300, 0);
+    if (initializeParameters) {
+        n_ex = 0;
+        param.ChargeRaster.clear();
+        param.exp_param.clear();
+        param.R_i = std::vector<double>(118, 0.0);
+        param.R_i_COSMO = std::vector<double>(118, 0.0);
+        param.HBClassElmnt = std::vector<int>(300, 0);
 
-    // Initialize hydrogen bond classes of the elements HBClassElmnt
-    // 0 : only non HB  | 1 : potential donor  | 2 : potential acceptor | 3 : potential donor or acceptor
-    // classify all hydrogens and some metals as potential donors and all others as potential acceptors.
+        // Initialize hydrogen bond classes of the elements HBClassElmnt
+        // 0 : only non HB  | 1 : potential donor  | 2 : potential acceptor | 3 : potential donor or acceptor
+        // classify all hydrogens and some metals as potential donors and all others as potential acceptors.
 
-    for (int atomic_number = 0; atomic_number < param.HBClassElmnt.size(); atomic_number++) {
-        if (atomic_number <= 100) param.HBClassElmnt[atomic_number] = 2;
-        else if (atomic_number > 100) param.HBClassElmnt[atomic_number] = 1;   // all hydrogens
+        for (int atomic_number = 0; atomic_number < param.HBClassElmnt.size(); atomic_number++) {
+            if (atomic_number <= 100) param.HBClassElmnt[atomic_number] = 2;
+            else if (atomic_number > 100) param.HBClassElmnt[atomic_number] = 1;   // all hydrogens
+        }
+
+        // set some values manually
+        param.HBClassElmnt[1] = 1;   // hydrogen
+        param.HBClassElmnt[3] = 1;   // li 
+        param.HBClassElmnt[4] = 1;   // be 
+        param.HBClassElmnt[11] = 1;  // na 
+        param.HBClassElmnt[12] = 1;  // mg 
+        param.HBClassElmnt[13] = 1;  // al 
+        param.HBClassElmnt[19] = 1;  // k* 
+        param.HBClassElmnt[20] = 1;  // ca 
+        param.HBClassElmnt[24] = 1;  // cr 
+        param.HBClassElmnt[26] = 1;  // fe 
+        param.HBClassElmnt[27] = 1;  // co 
+        param.HBClassElmnt[29] = 1;  // cu 
+        param.HBClassElmnt[30] = 1;  // zn 
+        param.HBClassElmnt[37] = 1;  // rb 
+        param.HBClassElmnt[38] = 1;  // sr 
+        param.HBClassElmnt[48] = 1;  // cd 
+        param.HBClassElmnt[55] = 1;  // cs 
+        param.HBClassElmnt[56] = 1;  // ba 
+
+
+        // initialize charge raster
+        int steps = (int)((param.sigmaMax - param.sigmaMin) / param.sigmaStep + 1 + 0.00001);
+        for (int i = 0; i < steps; i++) {
+            param.ChargeRaster.push_back(param.sigmaMin + param.sigmaStep * i);
+        }
     }
 
-    // set some values manually
-    param.HBClassElmnt[1] = 1;   // hydrogen
-    param.HBClassElmnt[3] = 1;   // li 
-    param.HBClassElmnt[4] = 1;   // be 
-    param.HBClassElmnt[11] = 1;  // na 
-    param.HBClassElmnt[12] = 1;  // mg 
-    param.HBClassElmnt[13] = 1;  // al 
-    param.HBClassElmnt[19] = 1;  // k* 
-    param.HBClassElmnt[20] = 1;  // ca 
-    param.HBClassElmnt[24] = 1;  // cr 
-    param.HBClassElmnt[26] = 1;  // fe 
-    param.HBClassElmnt[27] = 1;  // co 
-    param.HBClassElmnt[29] = 1;  // cu 
-    param.HBClassElmnt[30] = 1;  // zn 
-    param.HBClassElmnt[37] = 1;  // rb 
-    param.HBClassElmnt[38] = 1;  // sr 
-    param.HBClassElmnt[48] = 1;  // cd 
-    param.HBClassElmnt[55] = 1;  // cs 
-    param.HBClassElmnt[56] = 1;  // ba 
+    if (initializeMolecules)
+        molecules.clear();
 
-
-    // initialize charge raster
-    int steps = (int)((param.sigmaMax - param.sigmaMin) / param.sigmaStep + 1 + 0.00001);
-    for (int i = 0; i < steps; i++) {
-        param.ChargeRaster.push_back(param.sigmaMin + param.sigmaStep * i);
-    }
+    if (initializeCalculations)
+        calculations.clear();
 
     if (showBinarySpecs)
-        display("\nBINARY SPECS\n-------------------------\n" + compilation_mode + "\n" + OPENMP_parallelization + "\n" + vectorization_level + "\n-------------------------\n\n");
+        display("\nBINARY SPECS\n-------------------------\n" + compilation_mode + "\n" + OPENMP_parallelization + "\n" + vectorization_level + "\n" + precision + "\n-------------------------\n\n");
 }
 
 void averageAndClusterSegments(parameters& param, molecule& _molecule, int approximateNumberOfSegmentTypes = 0) {
@@ -198,8 +215,8 @@ void averageAndClusterSegments(parameters& param, molecule& _molecule, int appro
     }
 
     bool calculateSolvationEnergies = param.dGsolv_E_gas.size() > 0;
-    if (calculateSolvationEnergies) {
-        if (_molecule.qmMethod != "DFT_CPCM_BP86_def2-TZVP+def2-TZVPD_SP" && _molecule.qmMethod != "DFT_BP86_def2-TZVPD_SP") {
+    if (calculateSolvationEnergies){
+        if (_molecule.qmMethod != "DFT_CPCM_BP86_def2-TZVP+def2-TZVPD_SP" && _molecule.qmMethod != "DFT_BP86_def2-TZVPD_SP"){
             if (param.sw_dGsolv_calculation_strict == 1) {
                 throw std::runtime_error("The QSPR model for the molar volume only works for the quantum chemistry method DFT_BP86_def2-TZVPD_SP");
             }
@@ -211,7 +228,7 @@ void averageAndClusterSegments(parameters& param, molecule& _molecule, int appro
         int numberOfSiAtoms = 0;
         int numberOfHAtoms = 0;
         int numberOfOAtoms = 0;
-        for (int i = 0; i < numberOfAtoms; i++) {
+        for (int i = 0; i < numberOfAtoms; i++){
             if (_molecule.atomAtomicNumbers[i] == 14)
                 numberOfSiAtoms += 1;
             else if (_molecule.atomAtomicNumbers[i] == 1 || _molecule.atomAtomicNumbers[i] > 100)
@@ -220,10 +237,9 @@ void averageAndClusterSegments(parameters& param, molecule& _molecule, int appro
                 numberOfOAtoms += 1;
         }
 
-        if (numberOfAtoms == 3 && numberOfHAtoms == 2 && numberOfOAtoms == 1) {
+        if (numberOfAtoms == 3 && numberOfHAtoms == 2 && numberOfOAtoms == 1){
             _molecule.molarVolumeAt25C = 18.06863632;
-        }
-        else {
+        } else {
             Eigen::ArrayXd averagedSigmasSquared = averagedSigmas.array() * averagedSigmas.array();
             double secondSigmaMoment = (averagedSigmasSquared * _molecule.segmentAreas.array()).sum() * 10000;
             double fourthSigmaMoment = (averagedSigmasSquared * averagedSigmasSquared * _molecule.segmentAreas.array()).sum() * 100000000;
@@ -262,13 +278,13 @@ void averageAndClusterSegments(parameters& param, molecule& _molecule, int appro
     }
 
     // cluster segments into segment types
-    float sigmaLeft = -1;
-    float sigmaRight = -1;
+    double sigmaLeft = -1;
+    double sigmaRight = -1;
     double AsigmaLeft = -1;
     double AsigmaRight = -1;
 
-    float sigmaCorrLeft = -1;
-    float sigmaCorrRight = -1;
+    double sigmaCorrLeft = -1;
+    double sigmaCorrRight = -1;
 
     double AsigmaLeftSigmaCorrLeft = -1;
     double AsigmaLeftSigmaCorrRight = -1;
@@ -281,8 +297,8 @@ void averageAndClusterSegments(parameters& param, molecule& _molecule, int appro
 
         unsigned short ind_Sigma_left = int((averagedSigmas(j) - param.sigmaMin) / param.sigmaStep);
 
-        sigmaLeft = (float)param.ChargeRaster[ind_Sigma_left];
-        sigmaRight = (float)param.ChargeRaster[ind_Sigma_left + 1];
+        sigmaLeft = param.ChargeRaster[ind_Sigma_left];
+        sigmaRight = param.ChargeRaster[ind_Sigma_left + 1];
 
         AsigmaRight = _molecule.segmentAreas(j) * (averagedSigmas(j) - sigmaLeft) / param.sigmaStep;
         AsigmaLeft = _molecule.segmentAreas(j) * (sigmaRight - averagedSigmas(j)) / param.sigmaStep;
@@ -291,8 +307,8 @@ void averageAndClusterSegments(parameters& param, molecule& _molecule, int appro
         if (calculateMisfitCorrelation == true) {
             ind_SigmaCorr_left = int((averagedSigmaCorrs(j) - param.sigmaMin) / param.sigmaStep);
 
-            sigmaCorrLeft = (float)param.ChargeRaster[ind_SigmaCorr_left];
-            sigmaCorrRight = (float)param.ChargeRaster[ind_SigmaCorr_left + 1];
+            sigmaCorrLeft = param.ChargeRaster[ind_SigmaCorr_left];
+            sigmaCorrRight = param.ChargeRaster[ind_SigmaCorr_left + 1];
 
             AsigmaLeftSigmaCorrRight = AsigmaLeft * (averagedSigmaCorrs(j) - sigmaCorrLeft) / param.sigmaStep;
             AsigmaLeftSigmaCorrLeft = AsigmaLeft * (sigmaCorrRight - averagedSigmaCorrs(j)) / param.sigmaStep;
@@ -434,118 +450,121 @@ molecule loadNewMolecule(parameters& param, std::string componentPath) {
     parts = split(parts[parts.size() - 1], '.');
     newMolecule.name = trim(parts[0]);
 
-    int numberOfAtoms = int(newMolecule.atomAtomicNumbers.size());
+    // if sigma profile not yet loaded
+    if (newMolecule.segments.size() == 0) {
+        double sumOfScreeningCharge = (newMolecule.segmentAreas.array() * newMolecule.segmentSigmas.array()).matrix().sum();
+        newMolecule.moleculeCharge = (signed char)(std::round(-1.0f * sumOfScreeningCharge));
 
-    float sumOfScreeningCharge = float((newMolecule.segmentAreas.array() * newMolecule.segmentSigmas.array()).matrix().sum());
+        int numberOfAtoms = int(newMolecule.atomAtomicNumbers.size());
 
-    newMolecule.moleculeCharge = (signed char)(std::round(-1.0f * sumOfScreeningCharge));
-
-    // Store atomic radii and check for consistency
-    for (int atomIndex = 0; atomIndex < numberOfAtoms; atomIndex++) {
-        int AtomicNumber = newMolecule.atomAtomicNumbers(atomIndex);
-        if (param.R_i_COSMO[AtomicNumber] != 0 && newMolecule.atomRadii(atomIndex) != param.R_i_COSMO[AtomicNumber]) {
-            throw std::runtime_error("Inconsistent radii set for atomic number " + std::to_string(AtomicNumber) + " was found.");
+        // Store atomic radii and check for consistency
+        for (int atomIndex = 0; atomIndex < numberOfAtoms; atomIndex++) {
+            int AtomicNumber = newMolecule.atomAtomicNumbers(atomIndex);
+            if (param.R_i_COSMO[AtomicNumber] != 0 && newMolecule.atomRadii(atomIndex) != param.R_i_COSMO[AtomicNumber]) {
+                throw std::runtime_error("Inconsistent radii set for atomic number " + std::to_string(AtomicNumber) + " was found.");
+            }
+            else if (param.R_i_COSMO[AtomicNumber] == 0 && newMolecule.atomRadii(atomIndex) != 0) {
+                param.R_i_COSMO[AtomicNumber] = newMolecule.atomRadii(atomIndex);
+            }
         }
-        else if (param.R_i_COSMO[AtomicNumber] == 0 && newMolecule.atomRadii(atomIndex) != 0) {
-            param.R_i_COSMO[AtomicNumber] = newMolecule.atomRadii(atomIndex);
+
+        // Calculate distance between atoms
+        Eigen::MatrixXd distanceAtomAtomSquared(numberOfAtoms, numberOfAtoms);
+
+        for (int atomIndex = 0; atomIndex < numberOfAtoms; atomIndex++) {
+            Eigen::MatrixXd thisAtomPosition = newMolecule.atomPositions(atomIndex, Eigen::indexing::all);
+            distanceAtomAtomSquared(Eigen::indexing::all, atomIndex) = (newMolecule.atomPositions - thisAtomPosition.replicate(numberOfAtoms, 1)).array().square().rowwise().sum();
         }
-    }
 
-    // Calculate distance between atoms
-    Eigen::MatrixXd distanceAtomAtomSquared(numberOfAtoms, numberOfAtoms);
+        // set moleculeGroup
+        int moleculeGroup = 0;
 
-    for (int atomIndex = 0; atomIndex < numberOfAtoms; atomIndex++) {
-        Eigen::MatrixXd thisAtomPosition = newMolecule.atomPositions(atomIndex, Eigen::indexing::all);
-        distanceAtomAtomSquared(Eigen::indexing::all, atomIndex) = (newMolecule.atomPositions - thisAtomPosition.replicate(numberOfAtoms, 1)).array().square().rowwise().sum();
-    }
+        if (param.sw_differentiateMoleculeGroups == 1) {
 
-    // set moleculeGroup
-    int moleculeGroup = 0;
+            moleculeGroup = -1;
 
-    if (param.sw_differentiateMoleculeGroups == 1) {
-
-        moleculeGroup = -1;
-
-        if (numberOfAtoms == 3) {
-            int numberOfFoundOxygens = 0;
-            int numberOfFoundHydrogens = 0;
-            for (int atomIndex = 0; atomIndex < numberOfAtoms; atomIndex++) {
-                if (newMolecule.atomAtomicNumbers(atomIndex) == 1) {
-                    numberOfFoundHydrogens += 1;
+            if (numberOfAtoms == 3) {
+                int numberOfFoundOxygens = 0;
+                int numberOfFoundHydrogens = 0;
+                for (int atomIndex = 0; atomIndex < numberOfAtoms; atomIndex++) {
+                    if (newMolecule.atomAtomicNumbers(atomIndex) == 1) {
+                        numberOfFoundHydrogens += 1;
+                    }
+                    else if (newMolecule.atomAtomicNumbers(atomIndex) == 8) {
+                        numberOfFoundOxygens += 1;
+                    }
                 }
-                else if (newMolecule.atomAtomicNumbers(atomIndex) == 8) {
-                    numberOfFoundOxygens += 1;
+
+                if (numberOfFoundOxygens == 1 && numberOfFoundHydrogens == 2) {
+                    moleculeGroup = 2;
                 }
             }
 
-            if (numberOfFoundOxygens == 1 && numberOfFoundHydrogens == 2) {
-                moleculeGroup = 2;
+            if (moleculeGroup == -1) {
+                if (newMolecule.moleculeCharge == 0) {
+                    moleculeGroup = numberOfAtoms == 1 ? 0 : 1;
+                }
+                else if (newMolecule.moleculeCharge > 0) {
+                    moleculeGroup = numberOfAtoms == 1 ? 3 : 4;
+                }
+                else if (newMolecule.moleculeCharge < 0) {
+                    moleculeGroup = numberOfAtoms == 1 ? 5 : 6;
+                }
             }
         }
+        newMolecule.moleculeGroup = moleculeGroup;
 
-        if (moleculeGroup == -1) {
-            if (newMolecule.moleculeCharge == 0) {
-                moleculeGroup = numberOfAtoms == 1 ? 0 : 1;
-            }
-            else if (newMolecule.moleculeCharge > 0) {
-                moleculeGroup = numberOfAtoms == 1 ? 3 : 4;
-            }
-            else if (newMolecule.moleculeCharge < 0) {
-                moleculeGroup = numberOfAtoms == 1 ? 5 : 6;
-            }
-        }
-    }
-    newMolecule.moleculeGroup = moleculeGroup;
+        // this changes the atomic number of a hydrogen atom to 100 + the atomic number of the closest heavy atom
+        // giving the abbility to differentiate between hydrogen atoms depending on the atom they are bound to.
+        if (param.sw_differentiateHydrogens == 1) {
 
-    // this changes the atomic number of a hydrogen atom to 100 + the atomic number of the closest heavy atom
-    // giving the abbility to differentiate between hydrogen atoms depending on the atom they are bound to.
-    if (param.sw_differentiateHydrogens == 1) {
-
-        for (int atomIndexI = 0; atomIndexI < numberOfAtoms; atomIndexI++) {
-            double minimumDistanceAtomIAtomJSquared = 10e14;
-            int closestAtomIndex = -1;
-            if (newMolecule.atomAtomicNumbers(atomIndexI) != 1) {
-                continue;
-            }
-
-            for (int atomIndexJ = 0; atomIndexJ < numberOfAtoms; atomIndexJ++) {
-
-                if (atomIndexI == atomIndexJ) {
+            for (int atomIndexI = 0; atomIndexI < numberOfAtoms; atomIndexI++) {
+                double minimumDistanceAtomIAtomJSquared = 10e14;
+                int closestAtomIndex = -1;
+                if (newMolecule.atomAtomicNumbers(atomIndexI) != 1) {
                     continue;
                 }
 
-                // search for next atom that is not a Hydrogen
-                if (newMolecule.atomAtomicNumbers(atomIndexJ) == 1 && newMolecule.atomAtomicNumbers(atomIndexJ) < 100) {
-                    continue;
-                }
+                for (int atomIndexJ = 0; atomIndexJ < numberOfAtoms; atomIndexJ++) {
 
-                if (distanceAtomAtomSquared(atomIndexI, atomIndexJ) < minimumDistanceAtomIAtomJSquared) {
-                    minimumDistanceAtomIAtomJSquared = distanceAtomAtomSquared(atomIndexI, atomIndexJ);
-                    closestAtomIndex = atomIndexJ;
+                    if (atomIndexI == atomIndexJ) {
+                        continue;
+                    }
+
+                    // search for next atom that is not a Hydrogen unless tmolecule is H2
+                    if (newMolecule.atomAtomicNumbers(atomIndexJ) == 1 && newMolecule.atomAtomicNumbers(atomIndexJ) < 100 && numberOfAtoms != 2) {
+                        continue;
+                    }
+
+                    if (distanceAtomAtomSquared(atomIndexI, atomIndexJ) < minimumDistanceAtomIAtomJSquared) {
+                        minimumDistanceAtomIAtomJSquared = distanceAtomAtomSquared(atomIndexI, atomIndexJ);
+                        closestAtomIndex = atomIndexJ;
+                    }
                 }
+                int newAtomicNumber = 100 + newMolecule.atomAtomicNumbers(closestAtomIndex);
+                newMolecule.atomAtomicNumbers(atomIndexI) = newAtomicNumber;
+                param.R_i_COSMO[newAtomicNumber] = param.R_i_COSMO[1];
             }
-            newMolecule.atomAtomicNumbers(atomIndexI) = 100 + newMolecule.atomAtomicNumbers(closestAtomIndex);
-            param.R_i_COSMO[100 + newMolecule.atomAtomicNumbers(closestAtomIndex)] = param.R_i_COSMO[1];
         }
+        else if (param.sw_differentiateHydrogens != 0) {
+            throw std::runtime_error("differentiateHydrogens accepts values [0, 1]");
+        }
+
+        int numberOfSegments = int(newMolecule.segmentAreas.size());
+        newMolecule.segmentAtomicNumber = Eigen::VectorXi(numberOfSegments);
+
+        for (int i = 0; i < numberOfSegments; i++) {
+
+            int atomicNumber = newMolecule.atomAtomicNumbers(newMolecule.segmentAtomIndices(i));
+            newMolecule.segmentAtomicNumber(i) = atomicNumber;
+        }
+
+        newMolecule.segmentHydrogenBondingType = Eigen::VectorXi(numberOfSegments);
+        newMolecule.segmentAtomicPolariz = Eigen::VectorXd(numberOfSegments);
+
+        projectSegments(param,newMolecule);
+        averageAndClusterSegments(param, newMolecule);
     }
-    else if (param.sw_differentiateHydrogens != 0) {
-        throw std::runtime_error("differentiateHydrogens accepts values [0, 1]");
-    }
-
-    int numberOfSegments = int(newMolecule.segmentAreas.size());
-    newMolecule.segmentAtomicNumber = Eigen::VectorXi(numberOfSegments);
-
-    for (int i = 0; i < numberOfSegments; i++) {
-
-        int atomicNumber = newMolecule.atomAtomicNumbers(newMolecule.segmentAtomIndices(i));
-        newMolecule.segmentAtomicNumber(i) = atomicNumber;
-    }
-
-    newMolecule.segmentHydrogenBondingType = Eigen::VectorXi(numberOfSegments);
-    newMolecule.segmentAtomicPolariz = Eigen::VectorXd(numberOfSegments);
-
-    projectSegments(param,newMolecule);
-    averageAndClusterSegments(param, newMolecule);
 
     newMolecule.clear_unneeded_matrices(param.sw_alwaysReloadSigmaProfiles);
     newMolecule.segments.shrink_to_fit();
@@ -589,7 +608,7 @@ void resizeMonoatomicCations(parameters& param, std::vector<std::shared_ptr<mole
         }
     }
 #ifdef MEASURE_TIME
-    rescaleSegments_total_ms += std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::high_resolution_clock::now() - rescaleSegments_last).count();
+    rescaleSegments_total_ms += (const unsigned long)(std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::high_resolution_clock::now() - rescaleSegments_last).count());
 #endif
 }
 
@@ -645,15 +664,14 @@ void rescaleSegments(parameters& param, calculation& _calculation) {
             double AsigmaLeft = newArea * (sigmaRight - newSigma) / param.sigmaStep;
 
             _calculation.segments.SegmentTypeAreas[ind_left][ind_molecule] = AsigmaLeft;
-            _calculation.segments.SegmentTypeSigma[ind_left] = (float)sigmaLeft;
+            _calculation.segments.SegmentTypeSigma[ind_left] = sigmaLeft;
 
             _calculation.segments.SegmentTypeAreas[ind_right][ind_molecule] = AsigmaRight;
-            _calculation.segments.SegmentTypeSigma[ind_right] = (float)sigmaRight;
+            _calculation.segments.SegmentTypeSigma[ind_right] = sigmaRight;
 
         }
     }
 }
-
 
 void calculateSegmentConcentrations(calculation& _calculation) {
     // calculate the mole fraction of segments for each concentration
@@ -662,7 +680,7 @@ void calculateSegmentConcentrations(calculation& _calculation) {
         int firstNonZeroSegmentIndex = 0;
         int lastNonZeroSegmentIndex = int(_calculation.concentrations.size()) - 1;
 
-        std::vector<float> segmentConcentration(_calculation.segments.size(), 0.0f);
+        std::vector<double> segmentConcentration(_calculation.segments.size(), 0.0);
 
         double sumAreaSegmentsConcentrationj = 0.0;
 
@@ -676,7 +694,7 @@ void calculateSegmentConcentrations(calculation& _calculation) {
                 sumAreaSegmentsConcentrationj += thisArea;
             }
 
-            segmentConcentration[k] = float(areaSegmentK);
+            segmentConcentration[k] = areaSegmentK;
         }
 
         double cumulativeSumOfAreasFromSegmentZeroOn = 0.0;
@@ -694,7 +712,7 @@ void calculateSegmentConcentrations(calculation& _calculation) {
                 lastNonZeroSegmentIndex = k;
             }
 
-            _calculation.segmentConcentrations(k, j) = float(segmentConcentration[k] / sumAreaSegmentsConcentrationj);
+            _calculation.segmentConcentrations(k, j) = calcType(segmentConcentration[k] / sumAreaSegmentsConcentrationj);
         }
 
         _calculation.lowerBoundIndexForCOSMOSPACECalculation[j] = RoundDownToNextMultipleOfEight(firstNonZeroSegmentIndex);
@@ -748,8 +766,8 @@ void finishCalculationInitiation(calculation& _calculation) {
     }
 
     // initiate arrays for the calculation
-    _calculation.segmentGammas = Eigen::MatrixXf::Constant(RoundUpToNextMultipleOfEight(int(_calculation.segments.size())), int(_calculation.concentrations.size()), 1.0f);
-    _calculation.segmentConcentrations = Eigen::MatrixXf::Zero(RoundUpToNextMultipleOfEight(int(_calculation.segments.size())), int(_calculation.concentrations.size()));
+    _calculation.segmentGammas = MatrixCalcType::Constant(RoundUpToNextMultipleOfEight(int(_calculation.segments.size())), int(_calculation.concentrations.size()), 1.0);
+    _calculation.segmentConcentrations = MatrixCalcType::Zero(RoundUpToNextMultipleOfEight(int(_calculation.segments.size())), int(_calculation.concentrations.size()));
 
     _calculation.PhiDash_pxi = Eigen::MatrixXd::Zero(_calculation.concentrations.size(), _calculation.components.size());
     _calculation.ThetaDash_pxi = Eigen::MatrixXd::Zero(_calculation.concentrations.size(), _calculation.components.size());
@@ -781,11 +799,11 @@ void calculateLnGammaCombinatorial(parameters& param, calculation& _calculation)
         }
     }
 
-    std::vector<float> qi_std(_calculation.components.size());
+    std::vector<double> qi_std(_calculation.components.size());
 
     /* Calculation of molecule specific parameters for combinatorial contribution */
     for (int i = 0; i < _calculation.components.size(); i++) {
-        qi_std[i] = float(_calculation.components[i]->Area / param.comb_SG_A_std);
+        qi_std[i] = _calculation.components[i]->Area / param.comb_SG_A_std;
     }
 
     Eigen::MatrixXd lnGamaForCalculations = Eigen::MatrixXd::Zero(_calculation.concentrations.size(), _calculation.components.size());
@@ -884,7 +902,7 @@ void calculateLnGammaCombinatorial(parameters& param, calculation& _calculation)
             }
         }
     }
-    else if (param.sw_combTerm != 0) {
+    else if (param.sw_combTerm != 0) { 
         throw std::runtime_error("Error: Invalid switch value for combinatorial term.\n");
     }
 
@@ -896,18 +914,21 @@ void calculateLnGammaCombinatorial(parameters& param, calculation& _calculation)
 
         for (int j = 0; j < _calculation.components.size(); j++) {
 
-            float multiplier = 1.0f;
+            double multiplier = 1.0;
             // for an ion with reference state PureComponentsOnlyNeutral
             if (_calculation.referenceStateType[h] == 1 && _calculation.referenceStateCalculationIndices[h][j] == -1) {
                 multiplier = NAN;
             }
-            _calculation.lnGammaCombinatorial(h, j) = float(multiplier * lnGamaForCalculations(i, j));
+            _calculation.lnGammaCombinatorial(h, j) = multiplier * lnGamaForCalculations(i, j);
+#ifdef PRINT_DEBUG_INFO
+            display("lnGammaCombinatorial_1_" + std::to_string(h) + ": " + std::to_string(_calculation.lnGammaCombinatorial(h, j)) + "\n");
+#endif
 
             // only subtract reference state value if reference state type is not COSMO
             if (_calculation.referenceStateType[h] != 3 && _calculation.referenceStateType[h] != 4) {
                 int indexOfReferenceStateCalculation = _calculation.actualConcentrationIndices[_calculation.referenceStateCalculationIndices[h][j]];
 
-                _calculation.lnGammaCombinatorial(h, j) -= float(lnGamaForCalculations(indexOfReferenceStateCalculation, j));
+                _calculation.lnGammaCombinatorial(h, j) -= lnGamaForCalculations(indexOfReferenceStateCalculation, j);
             }
         }
     }
@@ -922,14 +943,14 @@ void calculateLnGammaResidual(parameters& param, calculation& _calculation) {
     const int numberOfSegments = int(_calculation.segments.size());
     const int nMultipleOfEight = RoundUpToNextMultipleOfEight(numberOfSegments);
 
-    Eigen::MatrixXf temporary_lnGammaMolecule = Eigen::MatrixXf::Zero(_calculation.concentrations.size(), _calculation.components.size());
+    Eigen::MatrixXd temporary_lnGammaMolecule = Eigen::MatrixXd::Zero(_calculation.concentrations.size(), _calculation.components.size());
 
-    Eigen::Tensor<float, 4, Eigen::RowMajor> temporary_averageInteractionEnergies;
-    Eigen::Tensor<float, 3, Eigen::RowMajor> temporary_partialMolarEnergies;
+    Eigen::Tensor<double, 4, Eigen::RowMajor> temporary_averageInteractionEnergies;
+    Eigen::Tensor<double, 3, Eigen::RowMajor> temporary_partialMolarEnergies;
 
     if (param.sw_calculateContactStatisticsAndAdditionalProperties > 0) {
 
-        temporary_averageInteractionEnergies = Eigen::Tensor<float, 4, Eigen::RowMajor>(int(_calculation.concentrations.size()),
+        temporary_averageInteractionEnergies = Eigen::Tensor<double, 4, Eigen::RowMajor>(int(_calculation.concentrations.size()),
             param.numberOfPartialInteractionMatrices + 1, // +1 because A_int is the first one
             int(_calculation.components.size()),
             int(_calculation.components.size()));
@@ -937,7 +958,7 @@ void calculateLnGammaResidual(parameters& param, calculation& _calculation) {
         temporary_averageInteractionEnergies.setZero();
 
         if (param.sw_calculateContactStatisticsAndAdditionalProperties == 2) {
-            temporary_partialMolarEnergies = Eigen::Tensor<float, 3, Eigen::RowMajor>(int(_calculation.concentrations.size()),
+            temporary_partialMolarEnergies = Eigen::Tensor<double, 3, Eigen::RowMajor>(int(_calculation.concentrations.size()),
                 param.numberOfPartialInteractionMatrices + 1, // +1 because A_int is the first one
                 int(_calculation.components.size()));
 
@@ -951,7 +972,7 @@ void calculateLnGammaResidual(parameters& param, calculation& _calculation) {
     const double dampingFactor = 0.6;
     const double dampingFactorComplement = 1 - dampingFactor;
     const double convergenceThreshhold = 0.00001;   // originally this was 0.0000001;
-                                                    // however when using AVX and vectorized code with floats
+                                                    // however when using AVX and vectorized code (especially with floats)
                                                     // the accuracy of the calculation drops
                                                     // without increasing this value the gammas do not converge
                                                     // however since the convergence criteria was changed from
@@ -959,12 +980,12 @@ void calculateLnGammaResidual(parameters& param, calculation& _calculation) {
                                                     // still leads to numerically very similar results
 
     const int maximumNumberOfIterations = 50000;
-    double tempSum = 0.0;
+    double newGamma = 0.0;
 
 
-    Eigen::MatrixXf A_int = Eigen::MatrixXf::Zero(numberOfSegments, numberOfSegments);
-    Eigen::MatrixXf Tau = Eigen::MatrixXf::Zero(nMultipleOfEight, numberOfSegments);
-    Eigen::MatrixXf TauX = Eigen::MatrixXf::Zero(nMultipleOfEight, numberOfSegments);
+    MatrixCalcType A_int = MatrixCalcType::Zero(numberOfSegments, numberOfSegments);
+    MatrixCalcType Tau = MatrixCalcType::Zero(nMultipleOfEight, numberOfSegments);
+    MatrixCalcType TauX = MatrixCalcType::Zero(nMultipleOfEight, numberOfSegments);
 
     std::vector<Eigen::MatrixXd> partialInteractionMatrices;
 
@@ -977,7 +998,7 @@ void calculateLnGammaResidual(parameters& param, calculation& _calculation) {
     for (int g = 0; g < _calculation.TauConcentrationIndices.size(); g++) {
 
         // conditions
-        float temperature = _calculation.TauTemperatures[g];
+        double temperature = _calculation.TauTemperatures[g];
 
 #ifdef MEASURE_TIME
         std::chrono::high_resolution_clock::time_point calculateTau_last = std::chrono::high_resolution_clock::now();
@@ -992,7 +1013,7 @@ void calculateLnGammaResidual(parameters& param, calculation& _calculation) {
         calculateInteractionMatrix(_calculation.segments, A_int, partialInteractionMatrices, param, temperature);
 
         // if the full interaction matrix is needed, fill upper right half
-        if (param.sw_calculateContactStatisticsAndAdditionalProperties > 0) {
+        if (param.sw_calculateContactStatisticsAndAdditionalProperties > 0){
             for (int i = 0; i < numberOfSegments; i++) {
                 for (int j = i + 1; j < numberOfSegments; j++) {
                     // always j >= i + 1
@@ -1012,15 +1033,15 @@ void calculateLnGammaResidual(parameters& param, calculation& _calculation) {
         // calculate Tau from the interaction matrix A_int
         int idx = -1;
         int columnSum = 0;
-        const float minus_div_RT = float(-1.0f / (R_GAS_CONSTANT * temperature));
+        const calcType minus_div_RT = calcType(-1.0 / (R_GAS_CONSTANT * temperature));
 
-        float val;
-        float* Tau_1D = &(Tau(0, 0));
+        calcType val;
+        calcType* Tau_1D = &(Tau(0, 0));
         for (int i = 0; i < numberOfSegments; i++) {
             columnSum = i * nMultipleOfEight;
             for (int j = i; j < numberOfSegments; j++) {
                 // always j >= i
-                val = expf(A_int(j, i) * minus_div_RT);
+                val = exp(A_int(j, i) * minus_div_RT);
 
                 idx = columnSum + j;
                 Tau_1D[idx] = val;
@@ -1029,19 +1050,19 @@ void calculateLnGammaResidual(parameters& param, calculation& _calculation) {
         }
 
 #ifdef MEASURE_TIME
-        calculateTau_total_ms += std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::high_resolution_clock::now() - calculateTau_last).count();
+        calculateTau_total_ms += (const unsigned long)(std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::high_resolution_clock::now() - calculateTau_last).count());
 #endif
 
-#ifdef DEBUG_INFO
+#ifdef PRINT_DEBUG_INFO
         Eigen::MatrixXd Tau_d = Tau.cast<double>();
-        WriteEigenMatrixtoFile("Tau_" + std::to_string(_calculation.number) + "_" + std::to_string(g), Tau_d);
+        WriteEigenMatrixToFile("Tau_" + std::to_string(_calculation.number) + "_" + std::to_string(g), Tau_d);
 #endif
 
         for (int h = 0; h < _calculation.TauConcentrationIndices[g].size(); h++) {
 
             int i = _calculation.TauConcentrationIndices[g][h];
 
-            float* gammas = &(_calculation.segmentGammas(0, i));
+            calcType* gammas = &(_calculation.segmentGammas(0, i));
 #ifdef MEASURE_TIME
             std::chrono::high_resolution_clock::time_point calculateCOSMOSPACE_last = std::chrono::high_resolution_clock::now();
 #endif
@@ -1051,9 +1072,9 @@ void calculateLnGammaResidual(parameters& param, calculation& _calculation) {
 
             { // as local as possible scope for all variables used in your loops
 
-                const float* vTau_1D = &(Tau(0, 0));
-                const float* vX = &(_calculation.segmentConcentrations(0, i));
-                float* vTauX_1D = &(TauX(0, 0));
+                const calcType* vTau_1D = &(Tau(0, 0));
+                const calcType* vX = &(_calculation.segmentConcentrations(0, i));
+                calcType* vTauX_1D = &(TauX(0, 0));
                 int idx = 0;
                 int columnSum = 0;
 
@@ -1063,26 +1084,45 @@ void calculateLnGammaResidual(parameters& param, calculation& _calculation) {
                     columnSum = j * nMultipleOfEight;
 
 #if defined(__AVX__) || defined(__FMA__)//AVX
+#if defined(USE_DOUBLE)
+                    for (int k = lowerBoundIndexForCOSMOSPACECalculation; k < upperBoundIndexForCOSMOSPACECalculation; k += 4) {
+                        idx = columnSum + k;
+
+                        _mm256_store_pd(vTauX_1D + idx, _mm256_mul_pd(_mm256_load_pd(vTau_1D + idx), _mm256_load_pd(vX + k)));
+                    }
+
+#else
                     for (int k = lowerBoundIndexForCOSMOSPACECalculation; k < upperBoundIndexForCOSMOSPACECalculation; k += 8) {
                         idx = columnSum + k;
 
                         _mm256_store_ps(vTauX_1D + idx, _mm256_mul_ps(_mm256_load_ps(vTau_1D + idx), _mm256_load_ps(vX + k)));
                     }
+#endif
+
 #else //SSE3
+#if defined(USE_DOUBLE)
+                    for (int k = lowerBoundIndexForCOSMOSPACECalculation; k < upperBoundIndexForCOSMOSPACECalculation; k += 2) {
+                        idx = columnSum + k;
+
+                        _mm_store_pd(vTauX_1D + idx, _mm_mul_pd(_mm_load_pd(vTau_1D + idx), _mm_load_pd(vX + k)));
+                    }
+
+#else
                     for (int k = lowerBoundIndexForCOSMOSPACECalculation; k < upperBoundIndexForCOSMOSPACECalculation; k += 4) {
                         idx = columnSum + k;
 
                         _mm_store_ps(vTauX_1D + idx, _mm_mul_ps(_mm_load_ps(vTau_1D + idx), _mm_load_ps(vX + k)));
                     }
 #endif
+#endif
 
                 }
             }
 
-#ifdef DEBUG_INFO
-            Write1DArraytoFile<float>("X_" + std::to_string(_calculation.number) + "_" + std::to_string(g) + "_" + std::to_string(i), &(_calculation.segmentConcentrations(0, i)), 1, nMultipleOfEight);
+#ifdef PRINT_DEBUG_INFO
+            Write1DArrayToFile<calcType>("X_" + std::to_string(_calculation.number) + "_" + std::to_string(g) + "_" + std::to_string(i), &(_calculation.segmentConcentrations(0, i)), 1, nMultipleOfEight);
             Eigen::MatrixXd TauX_d = TauX.cast<double>();
-            WriteEigenMatrixtoFile("TauX_" + std::to_string(_calculation.number) + "_" + std::to_string(g) + "_" + std::to_string(i), TauX_d);
+            WriteEigenMatrixToFile("TauX_" + std::to_string(_calculation.number) + "_" + std::to_string(g) + "_" + std::to_string(i), TauX_d);
 #endif
 
             int numberOfConvergedGammas = 0;
@@ -1102,7 +1142,7 @@ void calculateLnGammaResidual(parameters& param, calculation& _calculation) {
                             information += " -" + _calculation.components[j]->name + "\n";
                         }
 
-                        float* Tau_1D = &(Tau(0, 0));
+                        calcType* Tau_1D = &(Tau(0, 0));
                         for (int j = 0; j < numberOfSegments * nMultipleOfEight; j++) {
                             if (std::isnan(Tau_1D[j])) {
                                 information += " Some Tau entries are NaN.";
@@ -1133,7 +1173,7 @@ void calculateLnGammaResidual(parameters& param, calculation& _calculation) {
                     }
                     else {
                         // set all segment gammas to 1 as initial point for next execution
-                        _calculation.segmentGammas = Eigen::MatrixXf::Constant(RoundUpToNextMultipleOfEight(int(_calculation.segments.size())), int(_calculation.concentrations.size()), 1.0f);
+                        _calculation.segmentGammas = MatrixCalcType::Constant(RoundUpToNextMultipleOfEight(int(_calculation.segments.size())), int(_calculation.concentrations.size()), 1.0f);
                     }
 
                     throw std::runtime_error("COSMOSPACE did not converge for calculation " + std::to_string(_calculation.number) + " on concentration " + std::to_string(i) + ": maximum number of iterations reached. (" + std::to_string(numberOfConvergedGammas) + "/" + std::to_string(numberOfSegments) + ")");
@@ -1144,69 +1184,104 @@ void calculateLnGammaResidual(parameters& param, calculation& _calculation) {
                 int columnSum = 0;
 
                 for (int j = 0; j < numberOfSegments; j++) {
-                    tempSum = 0.0;
+                    newGamma = 0.0;
 
                     columnSum = j * nMultipleOfEight;
 
                     { // as local as possible scope for all variables used in your loops
 
-                        const float* vTauX = &(TauX(0, 0));
-                        float* vGammas = gammas;
+                        const calcType* vTauX = &(TauX(0, 0));
+                        calcType* vGammas = gammas;
 
 #if defined(__FMA__)
+
+#if defined(USE_DOUBLE)
+                        __m256d tempVectorSum = _mm256_set_pd(0.0, 0.0, 0.0, 0.0);
+
+                        for (int k = lowerBoundIndexForCOSMOSPACECalculation; k < upperBoundIndexForCOSMOSPACECalculation; k += 4) {
+                            tempVectorSum = _mm256_fmadd_pd(_mm256_load_pd(vTauX + columnSum + k), _mm256_load_pd(vGammas + k), tempVectorSum); //FMA
+                            //tempVectorSum = _mm256_add_pd(_mm256_mul_pd(_mm256_load_pd(vTauX + columnSum + k), _mm256_load_pd(vGammas + k)), tempVectorSum); //AVX
+                        }
+
+                        newGamma = hsum256_pd_avx(tempVectorSum);
+
+#else
                         __m256 tempVectorSum = _mm256_set_ps(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
 
                         for (int k = lowerBoundIndexForCOSMOSPACECalculation; k < upperBoundIndexForCOSMOSPACECalculation; k += 8) {
                             tempVectorSum = _mm256_fmadd_ps(_mm256_load_ps(vTauX + columnSum + k), _mm256_load_ps(vGammas + k), tempVectorSum); //FMA
                         }
 
-                        tempSum = hsum256_ps_avx(tempVectorSum);
+                        newGamma = double(hsum256_ps_avx(tempVectorSum));
+#endif
 
 #elif defined(__AVX__)
+#if defined(USE_DOUBLE)
+                        __m256d tempVectorSum = _mm256_set_pd(0.0, 0.0, 0.0, 0.0);
+
+                        for (int k = lowerBoundIndexForCOSMOSPACECalculation; k < upperBoundIndexForCOSMOSPACECalculation; k += 4) {
+                            tempVectorSum = _mm256_add_pd(_mm256_mul_pd(_mm256_load_pd(vTauX + columnSum + k), _mm256_load_pd(vGammas + k)), tempVectorSum); //AVX
+                        }
+
+                        newGamma = hsum256_pd_avx(tempVectorSum);
+
+#else
                         __m256 tempVectorSum = _mm256_set_ps(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
 
                         for (int k = lowerBoundIndexForCOSMOSPACECalculation; k < upperBoundIndexForCOSMOSPACECalculation; k += 8) {
                             //tempSum += hsum256_ps_avx(_mm256_mul_ps(_mm256_load_ps(vTauX + columnSum + k), _mm256_load_ps(vGammas + k))); // less accurate
                             tempVectorSum = _mm256_add_ps(_mm256_mul_ps(_mm256_load_ps(vTauX + columnSum + k), _mm256_load_ps(vGammas + k)), tempVectorSum); //AVX
                         }
+                        newGamma = double(hsum256_ps_avx(tempVectorSum));
+#endif
 
-                        tempSum = hsum256_ps_avx(tempVectorSum);
 #else//SSE3
+#if defined(USE_DOUBLE)
+                        __m128d tempVectorSum = _mm_setr_pd(0.0, 0.0);
+
+                        for (int k = lowerBoundIndexForCOSMOSPACECalculation; k < upperBoundIndexForCOSMOSPACECalculation; k += 2) {
+                            tempVectorSum = _mm_add_pd(_mm_mul_pd(_mm_load_pd(vTauX + columnSum + k), _mm_load_pd(vGammas + k)), tempVectorSum); //SSE
+                        }
+
+                        newGamma = hsum_pd_sse3(tempVectorSum);
+
+#else
                         __m128 tempVectorSum = _mm_setr_ps(0.0, 0.0, 0.0, 0.0);
 
                         for (int k = lowerBoundIndexForCOSMOSPACECalculation; k < upperBoundIndexForCOSMOSPACECalculation; k += 4) {
                             tempVectorSum = _mm_add_ps(_mm_mul_ps(_mm_load_ps(vTauX + columnSum + k), _mm_load_ps(vGammas + k)), tempVectorSum); //SSE
                         }
 
-                        tempSum = hsum_ps_sse3(tempVectorSum);
+                        newGamma = double(hsum_ps_sse3(tempVectorSum));
 #endif
-                    }
 
-                    // newGamma
-                    tempSum = 1 / tempSum;
+#endif
+                }
 
+                    newGamma = 1 / newGamma;
+                    double oldGamma = double(gammas[j]);
 
                     // apply damping
                     if (numberOfIteration > 200) {
-                        tempSum = dampingFactor * tempSum + dampingFactorComplement * gammas[j];
+                        newGamma = dampingFactor * newGamma + dampingFactorComplement * oldGamma;
                     }
 
                     // check convergence criteria
-                    if (abs(log(tempSum) - log(gammas[j])) <= convergenceThreshhold) {
+                    if (abs(log(newGamma) - log(oldGamma)) <= convergenceThreshhold) {
                         numberOfConvergedGammas++;
                     }
 
-                    gammas[j] = float(tempSum);
+                    gammas[j] = calcType(newGamma);
                 }
             }
 
-#ifdef DEBUG_INFO
+#ifdef PRINT_DEBUG_INFO
             display("COSMOSPACE converged with this number of iterations: " + std::to_string(numberOfIteration) + "\n");
-            Write1DArraytoFile<float>("Gammas_" + std::to_string(_calculation.number) + "_" + std::to_string(g) + "_" + std::to_string(i), gammas, 1, numberOfSegments);
+            Write1DArrayToFile<calcType>("Gammas_" + std::to_string(_calculation.number) + "_" + std::to_string(g) + "_" + std::to_string(i), gammas, 1, numberOfSegments);
 #endif
 
 #ifdef MEASURE_TIME
-            calculateCOSMOSPACE_total_ms += std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::high_resolution_clock::now() - calculateCOSMOSPACE_last).count();
+            calculateCOSMOSPACE_total_ms += (const unsigned long)(std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::high_resolution_clock::now() - calculateCOSMOSPACE_last).count());
             std::chrono::high_resolution_clock::time_point calculateContactStatistics_last = std::chrono::high_resolution_clock::now();
 #endif
 
@@ -1216,7 +1291,7 @@ void calculateLnGammaResidual(parameters& param, calculation& _calculation) {
             }
 
 #ifdef MEASURE_TIME
-            calculateContactStatistics_total_ms += std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::high_resolution_clock::now() - calculateContactStatistics_last).count();
+            calculateContactStatistics_total_ms += (const unsigned long)(std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::high_resolution_clock::now() - calculateContactStatistics_last).count());
             std::chrono::high_resolution_clock::time_point calculateGammasForMolecules_last = std::chrono::high_resolution_clock::now();
 #endif
             double div_Aeff = 1 / param.Aeff;
@@ -1226,14 +1301,17 @@ void calculateLnGammaResidual(parameters& param, calculation& _calculation) {
                 double lnGammaMolecule = 0;
 
                 for (int k = 0; k < numberOfSegments; k++) {
-                    lnGammaMolecule += _calculation.segments.SegmentTypeAreas[k][j] * div_Aeff * log(gammas[k]); // log(gammas[k]) is calculated more than once although not necessary
+                    lnGammaMolecule += _calculation.segments.SegmentTypeAreas[k][j] * div_Aeff * log(double(gammas[k])); // log(gammas[k]) is calculated more than once although not necessary
                 }
-
-                temporary_lnGammaMolecule(i, j) = float(lnGammaMolecule);
+#ifdef PRINT_DEBUG_INFO
+                display("lnGammaResidual_1_" + std::to_string(h) + ": " + std::to_string(lnGammaMolecule) + "\n");
+#endif
+                
+                temporary_lnGammaMolecule(i, j) = lnGammaMolecule;
             }
 
 #ifdef MEASURE_TIME
-            calculateGammasForMolecules_total_ms += std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::high_resolution_clock::now() - calculateGammasForMolecules_last).count();
+            calculateGammasForMolecules_total_ms += (const unsigned long)(std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::high_resolution_clock::now() - calculateGammasForMolecules_last).count());
 #endif
         }
     }
@@ -1250,12 +1328,16 @@ void calculateLnGammaResidual(parameters& param, calculation& _calculation) {
         for (int j = 0; j < _calculation.components.size(); j++) {
 
 
-            float multiplier = 1.0f;
+            double multiplier = 1.0;
             // for an ion with reference state PureComponentsOnlyNeutral
             if (_calculation.referenceStateType[h] == 1 && _calculation.referenceStateCalculationIndices[h][j] == -1) {
                 multiplier = NAN;
             }
             _calculation.lnGammaResidual(h, j) = multiplier * temporary_lnGammaMolecule(i, j);
+
+#ifdef PRINT_DEBUG_INFO
+            display("lnGammaResidual_2_" + std::to_string(h) + ": " + std::to_string(_calculation.lnGammaResidual(h, j)) + "\n");
+#endif
 
             if (param.sw_calculateContactStatisticsAndAdditionalProperties > 0) {
                 for (int k = 0; k < _calculation.components.size(); k++) {
@@ -1303,7 +1385,7 @@ void calculateLnGammaResidual(parameters& param, calculation& _calculation) {
     }
 
 #ifdef MEASURE_TIME
-    calculateGammasForMolecules_total_ms += std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::high_resolution_clock::now() - calculateGammasForMolecules_last).count();
+    calculateGammasForMolecules_total_ms += (const unsigned long)(std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::high_resolution_clock::now() - calculateGammasForMolecules_last).count());
 #endif
 }
 
@@ -1342,8 +1424,8 @@ void calculate(std::vector<int>& calculationIndices) {
                     }
                 }
                 calculations[calculationIndex].segments.sort();
-                calculations[calculationIndex].segmentGammas = Eigen::MatrixXf::Constant(RoundUpToNextMultipleOfEight(int(calculations[calculationIndex].segments.size())), int(calculations[calculationIndex].concentrations.size()), 1.0f);
-                calculations[calculationIndex].segmentConcentrations = Eigen::MatrixXf::Zero(RoundUpToNextMultipleOfEight(int(calculations[calculationIndex].segments.size())), int(calculations[calculationIndex].concentrations.size()));
+                calculations[calculationIndex].segmentGammas =MatrixCalcType::Constant(RoundUpToNextMultipleOfEight(int(calculations[calculationIndex].segments.size())), int(calculations[calculationIndex].concentrations.size()), 1.0f);
+                calculations[calculationIndex].segmentConcentrations =MatrixCalcType::Zero(RoundUpToNextMultipleOfEight(int(calculations[calculationIndex].segments.size())), int(calculations[calculationIndex].concentrations.size()));
             }
 
 
@@ -1354,14 +1436,14 @@ void calculate(std::vector<int>& calculationIndices) {
                 calculateSegmentConcentrations(calculations[calculationIndex]);
             }
 
-#ifdef DEBUG_INFO
+#ifdef PRINT_DEBUG_INFO
             display("number of components: " + std::to_string(calculations[calculationIndex].components.size()) + "\n");
             display("number of segments: " + std::to_string(calculations[calculationIndex].segments.size()) + "\n");
             display("number of concentrations: " + std::to_string(calculations[calculationIndex].concentrations.size()) + "\n");
 #endif
 
 #ifdef MEASURE_TIME
-            rescaleSegments_total_ms += std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::high_resolution_clock::now() - rescaleSegments_last).count();
+            rescaleSegments_total_ms += (const unsigned long)(std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::high_resolution_clock::now() - rescaleSegments_last).count());
             std::chrono::high_resolution_clock::time_point calculateCombinatorial_last = std::chrono::high_resolution_clock::now();
 #endif
             // recalculate combinatorial term if needed
@@ -1370,25 +1452,30 @@ void calculate(std::vector<int>& calculationIndices) {
             }
 
 #ifdef MEASURE_TIME
-            calculateCombinatorial_total_ms += std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::high_resolution_clock::now() - calculateCombinatorial_last).count();
+            calculateCombinatorial_total_ms += (const unsigned long)(std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::high_resolution_clock::now() - calculateCombinatorial_last).count());
             std::chrono::high_resolution_clock::time_point calculateResidual_last = std::chrono::high_resolution_clock::now();
 #endif
 
             // calculate residual part
             calculateLnGammaResidual(param, calculations[calculationIndex]);
-            //  using std::cout;
-            //  using std::endl;
-            //  std::cout << "residual is calculated";
 
 #ifdef MEASURE_TIME
-            calculateResidual_total_ms += std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::high_resolution_clock::now() - calculateResidual_last).count();
+            calculateResidual_total_ms += (const unsigned long)(std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::high_resolution_clock::now() - calculateResidual_last).count());
 #endif
 
             calculations[calculationIndex].lnGammaTotal = calculations[calculationIndex].lnGammaCombinatorial + calculations[calculationIndex].lnGammaResidual;
+#ifdef PRINT_DEBUG_INFO
+            for (int i_concentration = 0; i_concentration < calculations[calculationIndex].originalNumberOfCalculations; i_concentration++) {
+                for (int i_component = 0; i_component < calculations[calculationIndex].components.size(); i_component++) {
+                    display("lnGammaTotal_" + std::to_string(calculationIndex) + "_" + std::to_string(i_concentration) + "_" + std::to_string(i_component) + \
+                        ": " + std::to_string(calculations[calculationIndex].lnGammaTotal(i_concentration, i_component)) + "\n");
+                }
+            }
+#endif
 
             bool calculateSolvationEnergies = param.dGsolv_E_gas.size() > 0;
-            if (calculateSolvationEnergies) {
-                double kcalPerMol_per_Hartree = 2625.499639479 / 4.184;
+            if (calculateSolvationEnergies){
+                double kcalPerMol_per_Hartree = 2625.499639479/4.184;
                 double reference_pressure = 101325; // Pa = 1 atm;
                 std::vector<int> atomicNumbersWithout_dGsolv_tau = std::vector<int>();
                 double approximate_dGsolv_tau = 0.0262; // median of other values
@@ -1428,7 +1515,7 @@ void calculate(std::vector<int>& calculationIndices) {
                                         this_atom_dGsolv_tau = approximate_dGsolv_tau;
                                         atomicNumbersWithout_dGsolv_tau.push_back(it.first);
                                     }
-
+                                    
                                     E_vdw += this_atom_dGsolv_tau * it.second;
                                 }
                                 double referenceStateCorrection = RT_kcalPerMol * log(molar_volume_ideal_gas / (calculations[calculationIndex].components[i_solvent_component]->molarVolumeAt25C / 1E6));
@@ -1437,9 +1524,19 @@ void calculate(std::vector<int>& calculationIndices) {
                                 double mu_liquid = RT_kcalPerMol * calculations[calculationIndex].lnGammaTotal(i_concentration, i_component);
                                 double E_ring = param.dGsolv_omega_ring * param.dGsolv_numberOfAtomsInRing[i_component];
                                 dGsolv = E_diel + mu_liquid - E_vdw - E_ring - referenceStateCorrection - param.dGsolv_eta;
+#ifdef PRINT_DEBUG_INFO
+                                display("dGsolv_1_" + std::to_string(calculationIndex) + ": " + std::to_string(dGsolv) + "\n");
+                                display("E_diel: " + std::to_string(E_diel) + "\n");
+                                display("mu_liquid: " + std::to_string(mu_liquid) + "\n");
+                                display("E_vdw: " + std::to_string(E_vdw) + "\n");
+                                display("E_ring: " + std::to_string(E_ring) + "\n");
+                                display("referenceStateCorrection: " + std::to_string(referenceStateCorrection) + "\n");
+                                display("dGsolv_eta: " + std::to_string(param.dGsolv_eta) + "\n");
+#endif
+
                             }
 
-                            calculations[calculationIndex].dGsolv(i_concentration, i_component) = float(dGsolv);
+                            calculations[calculationIndex].dGsolv(i_concentration, i_component) = dGsolv;
                         }
                     }
                 }
@@ -1459,8 +1556,7 @@ void calculate(std::vector<int>& calculationIndices) {
 
                 }
             }
-            });
+        });
     }
     e.rethrow();
 }
-

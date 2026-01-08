@@ -70,7 +70,6 @@ void loadParametersOnPython(py::dict parameters) {
 		param.comb_SGG_beta = parameters["comb_SGG_beta"].cast<double>();
 	}
 
-
 	if (parameters.contains("dGsolv_eta")) {
 		param.dGsolv_eta = parameters["dGsolv_eta"].cast<double>();
 		param.dGsolv_omega_ring = parameters["dGsolv_omega_ring"].cast<double>();
@@ -156,12 +155,17 @@ void loadMoleculesOnPython(py::dict options, py::dict parameters, py::list compo
 
 }
 
-void loadCalculationsOnPython(py::list calculationsOnPython) {
+void loadCalculationsOnPython(py::list calculationsOnPython, bool reload = false) {
 
 	n_ex += 1;
 
-	if (n_ex != 2) {
-		throw std::runtime_error("loadCalculations should only be executed once after calling loadMolecules.");
+	if (reload) {
+		initialize(param, false, false, true, false);
+	}
+	else {
+		if (n_ex != 2) {
+			throw std::runtime_error("loadCalculations should only be executed once after calling loadMolecules.");
+		}
 	}
 
 	// load the calculations
@@ -177,6 +181,10 @@ void loadCalculationsOnPython(py::list calculationsOnPython) {
 	if (numCalcs == 0) {
 		throw std::runtime_error("Please specify at least one calculation.");
 	}
+
+	// important as otherwise the data behind Eigen::Maps
+	// can be lost when the vector is resized.
+	calculations.reserve(numCalcs);
 
 	for (int i = 0; i < numCalcs; i++) {
 
@@ -212,11 +220,11 @@ void loadCalculationsOnPython(py::list calculationsOnPython) {
 
 		for (int j = 0; j < (size_t)concentrations.shape(0); j++) {
 
-			std::vector<float> rowConcentration;
+			std::vector<double> rowConcentration;
 
-			float tempSumOfConcentrations = 0;
+			double tempSumOfConcentrations = 0;
 			for (int k = 0; k < numberOfComponents; k++) {
-				float val = (float)concentrations(j, k);
+				double val = (double)concentrations(j, k);
 				tempSumOfConcentrations += val;
 				rowConcentration.push_back(val);
 			}
@@ -225,7 +233,7 @@ void loadCalculationsOnPython(py::list calculationsOnPython) {
 				throw std::runtime_error("For calculation number " + std::to_string(i) + ", the concentrations do not add up to unity. residual concentration: " + std::to_string(abs(1.0f - tempSumOfConcentrations)));
 			}
 
-			float temperature = (float)temperatures(j);
+			double temperature = (double)temperatures(j);
 			
 			newCalculation.temperatures.push_back(temperature);
 			newCalculation.concentrations.push_back(rowConcentration);
@@ -248,10 +256,10 @@ void loadCalculationsOnPython(py::list calculationsOnPython) {
 
 			newCalculation.referenceStateType.push_back((unsigned short)referenceStateType);
 			
-			float tempSumOfConcentrations = 0;
+			double tempSumOfConcentrations = 0;
 			if (calculationDict.contains("reference_state_concentrations")) {
 				for (int k = 0; k < (size_t)referenceStateConcentrations.shape(1); k++) {
-					tempSumOfConcentrations += (float)referenceStateConcentrations(j, k);
+					tempSumOfConcentrations += (double)referenceStateConcentrations(j, k);
 				}
 			}
 
@@ -265,12 +273,12 @@ void loadCalculationsOnPython(py::list calculationsOnPython) {
 				std::vector<int> thisReferenceStateCalculationIndices;
 				for (int k = 0; k < numberOfComponents; k++) {
 
-					std::vector<float> referenceStateConcentration;
+					std::vector<double> referenceStateConcentration;
 					for (int m = 0; m < numberOfComponents; m++) {
 						referenceStateConcentration.push_back(k == m ? 1.0f : 0.0f);
 					}
 
-					float temperature = (float)temperatures(j);
+					double temperature = (double)temperatures(j);
 					int referenceStateCalculationIndex = (int)newCalculation.addOrFindArrayIndexForConcentration(referenceStateConcentration, temperature);
 					thisReferenceStateCalculationIndices.push_back(referenceStateCalculationIndex);
 
@@ -288,12 +296,12 @@ void loadCalculationsOnPython(py::list calculationsOnPython) {
 
 					if (newCalculation.components[k]->moleculeCharge == 0) {
 
-						std::vector<float> referenceStateConcentration;
+						std::vector<double> referenceStateConcentration;
 						for (int m = 0; m < numberOfComponents; m++) {
 							referenceStateConcentration.push_back(k == m ? 1.0f : 0.0f);
 						}
 
-						float temperature = (float)temperatures(j);
+						double temperature = (double)temperatures(j);
 						int referenceStateCalculationIndex = (int)newCalculation.addOrFindArrayIndexForConcentration(referenceStateConcentration, temperature);
 						thisReferenceStateCalculationIndices.push_back(referenceStateCalculationIndex);
 					}
@@ -306,9 +314,9 @@ void loadCalculationsOnPython(py::list calculationsOnPython) {
 			}
 			else if (referenceStateType == 2) { // Reference mixture
 
-				std::vector<float> referenceStateConcentration;
+				std::vector<double> referenceStateConcentration;
 				for (int m = 0; m < numberOfComponents; m++) {
-					referenceStateConcentration.push_back((float)referenceStateConcentrations(j, m));
+					referenceStateConcentration.push_back((double)referenceStateConcentrations(j, m));
 				}
 
 				if (referenceStateConcentrations.shape(1) != newCalculation.components.size()) {
@@ -319,7 +327,7 @@ void loadCalculationsOnPython(py::list calculationsOnPython) {
 					throw std::runtime_error("For calculation number " + std::to_string(i) + ", the reference concentrations do not add up to unity. residual concentration: " + std::to_string(abs(1.0f - tempSumOfConcentrations)));
 				}
 
-				float temperature = (float)temperatures(j);
+				double temperature = (double)temperatures(j);
 				int referenceStateCalculationIndex = (int)newCalculation.addOrFindArrayIndexForConcentration(referenceStateConcentration, temperature);
 
 				std::vector<int> thisReferenceStateCalculationIndices;
@@ -346,38 +354,38 @@ void loadCalculationsOnPython(py::list calculationsOnPython) {
 		// for this to work correctly the sizes of the n-dimensional numpy arrays and the type
 		// must be the same in python and c++ (float32/float) with same storage order: row major.
 
-		py::array_t<float> tempArray = py::array_t<float>(calculationDict["ln_gamma_x_SR_combinatorial_calc"]);
-		new (&newCalculation.lnGammaCombinatorial) Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>>(tempArray.mutable_data(),
+		py::array_t<double> tempArray = py::array_t<double>(calculationDict["ln_gamma_x_SR_combinatorial_calc"]);
+		new (&newCalculation.lnGammaCombinatorial) Eigen::Map<Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>>(tempArray.mutable_data(),
 			int(newCalculation.originalNumberOfCalculations),
 			int(newCalculation.components.size()));
 
-		tempArray = py::array_t<float>(calculationDict["ln_gamma_x_SR_residual_calc"]);
-		new (&newCalculation.lnGammaResidual) Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>>(tempArray.mutable_data(),
+		tempArray = py::array_t<double>(calculationDict["ln_gamma_x_SR_residual_calc"]);
+		new (&newCalculation.lnGammaResidual) Eigen::Map<Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>>(tempArray.mutable_data(),
 			int(newCalculation.originalNumberOfCalculations),
 			int(newCalculation.components.size()));
 
-		tempArray = py::array_t<float>(calculationDict["ln_gamma_x_SR_calc"]);
-		new (&newCalculation.lnGammaTotal) Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>>(tempArray.mutable_data(),
+		tempArray = py::array_t<double>(calculationDict["ln_gamma_x_SR_calc"]);
+		new (&newCalculation.lnGammaTotal) Eigen::Map<Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>>(tempArray.mutable_data(),
 			int(newCalculation.originalNumberOfCalculations),
 			int(newCalculation.components.size()));
 
 		if (calculationDict.contains("dGsolv")) {
-			tempArray = py::array_t<float>(calculationDict["dGsolv"]);
-			new (&newCalculation.dGsolv) Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>>(tempArray.mutable_data(),
+			tempArray = py::array_t<double>(calculationDict["dGsolv"]);
+			new (&newCalculation.dGsolv) Eigen::Map<Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>>(tempArray.mutable_data(),
 				int(newCalculation.originalNumberOfCalculations),
 				1);
 		}
 
 		if (param.sw_calculateContactStatisticsAndAdditionalProperties > 0) {
 
-			tempArray = py::array_t<float>(calculationDict["contact_statistics"]);
-			new (&newCalculation.contactStatistics) Eigen::TensorMap<Eigen::Tensor<float, 3, Eigen::RowMajor>>(tempArray.mutable_data(),
+			tempArray = py::array_t<double>(calculationDict["contact_statistics"]);
+			new (&newCalculation.contactStatistics) Eigen::TensorMap<Eigen::Tensor<double, 3, Eigen::RowMajor>>(tempArray.mutable_data(),
 				int(newCalculation.originalNumberOfCalculations),
 				int(newCalculation.components.size()),
 				int(newCalculation.components.size()));
 
-			tempArray = py::array_t<float>(calculationDict["average_surface_energies"]);
-			new (&newCalculation.averageSurfaceEnergies) Eigen::TensorMap<Eigen::Tensor<float, 4, Eigen::RowMajor>>(tempArray.mutable_data(),
+			tempArray = py::array_t<double>(calculationDict["average_surface_energies"]);
+			new (&newCalculation.averageSurfaceEnergies) Eigen::TensorMap<Eigen::Tensor<double, 4, Eigen::RowMajor>>(tempArray.mutable_data(),
 				int(newCalculation.originalNumberOfCalculations),
 				int(param.numberOfPartialInteractionMatrices) + 1, // +1 because A_int is the first one
 				int(newCalculation.components.size()),
@@ -385,8 +393,8 @@ void loadCalculationsOnPython(py::list calculationsOnPython) {
 
 			if (param.sw_calculateContactStatisticsAndAdditionalProperties == 2) {
 
-				tempArray = py::array_t<float>(calculationDict["partial_molar_energies"]);
-				new (&newCalculation.partialMolarEnergies) Eigen::TensorMap<Eigen::Tensor<float, 3, Eigen::RowMajor>>(tempArray.mutable_data(),
+				tempArray = py::array_t<double>(calculationDict["partial_molar_energies"]);
+				new (&newCalculation.partialMolarEnergies) Eigen::TensorMap<Eigen::Tensor<double, 3, Eigen::RowMajor>>(tempArray.mutable_data(),
 				int(newCalculation.originalNumberOfCalculations),
 				int(param.numberOfPartialInteractionMatrices) + 1, // +1 because A_int is the first one
 				int(newCalculation.components.size()));
@@ -438,11 +446,11 @@ py::list calculateOnPython(py::dict parameters, py::list calculationsOnPython, b
 
 				int j = calculations[calculationIndices[i]].actualConcentrationIndices[h];
 
-				std::vector<float> rowConcentration;
+				std::vector<double> rowConcentration;
 
-				float tempSumOfConcentrations = 0;
+				double tempSumOfConcentrations = 0;
 				for (int k = 0; k < calculations[calculationIndices[i]].components.size(); k++) {
-					float val = (float)concentrations(h, k);
+					double val = (double)concentrations(h, k);
 					tempSumOfConcentrations += val;
 					calculations[calculationIndices[i]].concentrations[j][k] = val;
 				}
@@ -472,10 +480,10 @@ py::list calculateOnPython(py::dict parameters, py::list calculationsOnPython, b
 
 				std::vector<int> referenceStateCalculationIndices = calculations[calculationIndices[i]].referenceStateCalculationIndices[h];
 
-				float tempSumOfConcentrations = 0;
+				double tempSumOfConcentrations = 0;
 				for (int k = 0; k < calculations[calculationIndices[i]].components.size(); k++) {
 					int referenceStateCalculationIndex = referenceStateCalculationIndices[k];
-					float val = (float)referenceStateConcentrations(h, k);
+					double val = (double)referenceStateConcentrations(h, k);
 					tempSumOfConcentrations += val;
 					calculations[calculationIndices[i]].concentrations[referenceStateCalculationIndex][k] = val;
 				}
@@ -497,7 +505,11 @@ py::list calculateOnPython(py::dict parameters, py::list calculationsOnPython, b
 
 }
 
+#ifdef USE_DOUBLE
+PYBIND11_MODULE(openCOSMORS_double, m) {
+#else
 PYBIND11_MODULE(openCOSMORS, m) {
+#endif
 	m.doc() = R"pbdoc(
         openCOSMO-RS
         -----------------------
@@ -519,10 +531,11 @@ PYBIND11_MODULE(openCOSMORS, m) {
 		This needs to be called before calling loadCalculations.
     )pbdoc");
 
-	m.def("loadCalculations", &loadCalculationsOnPython, R"pbdoc(
+	m.def("loadCalculations", &loadCalculationsOnPython, py::arg("calculationsOnPython"), py::arg("reload") = false, R"pbdoc(
         Loads all calculations.
 		This needs to be called before calling calculate.
     )pbdoc");
+
 	m.def("calculate", &calculateOnPython, py::arg("parameters"), py::arg("calculationsOnPython"), py::arg("reloadConcentrations") = false, py::arg("reloadReferenceConcentrations") = false, py::return_value_policy::reference, R"pbdoc(
         Calculates the complete list of calculations with the provided set of parameters.
 		These calculations should have been loaded with loadCalculations prior to executing calculate, otherwise this will produce an error.
