@@ -41,9 +41,6 @@
     <ClCompile Include="code\bindings_forPython.cpp">
       <Filter>Quelldateien</Filter>
     </ClCompile>
-    <ClCompile Include="code\bindings_forMATLAB.cpp">
-      <Filter>Quelldateien</Filter>
-    </ClCompile>
     <ClCompile Include="code\bindings_forCLI.cpp">
       <Filter>Quelldateien</Filter>
     </ClCompile>

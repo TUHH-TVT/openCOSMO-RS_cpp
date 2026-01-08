@@ -57,14 +57,30 @@ std::string vectorization_level = "vectorization: SSE3";
 #if defined(__GNUC__)
 // disable gcc compiler warning for comparing different types of numbers
 #pragma GCC diagnostic ignored "-Wsign-compare"
-// disable gcc compiler warning for reaordering initializers
+// disable gcc compiler warning for reordering initializers
 #pragma GCC diagnostic ignored "-Wreorder"
 // disable gcc compiler warning for formatting of scanning text
 #pragma GCC diagnostic ignored "-Wformat="
 #endif
 
+
+#include <Eigen/Dense>
+
+#if defined(USE_DOUBLE)
+using calcType = double;
+using MatrixCalcType = Eigen::MatrixXd;
+using VectorCalcType = Eigen::VectorXd;
+std::string precision = "    precision: double";
+#pragma message("    precision: double")
+#else
+using calcType = float;
+using MatrixCalcType = Eigen::MatrixXf;
+using VectorCalcType = Eigen::VectorXf;
+std::string precision = "    precision: single";
+#pragma message("    precision: single")
+#endif
+
 #include "types.hpp"
-#include "helper_functions.hpp"
 
 std::vector<std::shared_ptr<molecule>> molecules;
 std::vector<calculation> calculations;
