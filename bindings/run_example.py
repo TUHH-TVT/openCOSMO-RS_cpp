@@ -124,20 +124,20 @@ def fill_missing_calculation_structures(calculations, options):
         number_of_components = calculation['concentrations'].shape[1]
         number_of_concentrations = calculation['concentrations'].shape[0]
 
-        calculation['ln_gamma_x_SR_combinatorial_calc'] = np.zeros((number_of_concentrations, number_of_components),dtype= np.float32)
-        calculation['ln_gamma_x_SR_residual_calc'] = np.zeros((number_of_concentrations, number_of_components), dtype=np.float32)
-        calculation['ln_gamma_x_SR_calc'] = np.zeros((number_of_concentrations, number_of_components), dtype=np.float32)
+        calculation['ln_gamma_x_SR_combinatorial_calc'] = np.zeros((number_of_concentrations, number_of_components))
+        calculation['ln_gamma_x_SR_residual_calc'] = np.zeros((number_of_concentrations, number_of_components))
+        calculation['ln_gamma_x_SR_calc'] = np.zeros((number_of_concentrations, number_of_components))
         calculation['index'] = i
 
         if options['sw_SR_calculateContactStatisticsAndAdditionalProperties'] > 0:
             # one for Aij + number of  partial interaction matrices
             number_of_interaction_matrices = 1 + len(options['sw_SR_partialInteractionMatrices'])
             
-            calculation['contact_statistics'] = np.zeros((number_of_concentrations, number_of_components, number_of_components), dtype=np.float32)
-            calculation['average_surface_energies'] = np.zeros((number_of_concentrations, number_of_interaction_matrices, number_of_components, number_of_components), dtype=np.float32)
+            calculation['contact_statistics'] = np.zeros((number_of_concentrations, number_of_components, number_of_components))
+            calculation['average_surface_energies'] = np.zeros((number_of_concentrations, number_of_interaction_matrices, number_of_components, number_of_components))
 
             if options['sw_SR_calculateContactStatisticsAndAdditionalProperties'] == 2:
-                calculation['partial_molar_energies'] = np.zeros((number_of_concentrations, number_of_interaction_matrices, number_of_components), dtype=np.float32)
+                calculation['partial_molar_energies'] = np.zeros((number_of_concentrations, number_of_interaction_matrices, number_of_components))
     return calculations
 
 calculations = fill_missing_calculation_structures(calculations, options)
