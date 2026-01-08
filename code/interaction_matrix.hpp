@@ -35,8 +35,6 @@ void calculateInteractionMatrix(segmentTypeCollection& segments, Eigen::MatrixXf
     // misfit 
     double const misfit_prefactor = param.Aeff * param.alpha * 0.5;
 
-
-    std::map<int, double> ioniz_map;;
     double ionizationPotentialCorrection = 0;
 
     // hb
@@ -47,20 +45,6 @@ void calculateInteractionMatrix(segmentTypeCollection& segments, Eigen::MatrixXf
     double const hb_prefactor = param.Aeff * CHB_T;
     double val = 0;
     double vdw_val = 0;
-
-    ioniz_map[1] = 13.598; // H (to C)   
-    ioniz_map[7] = 14.534;       // F
-    ioniz_map[8] = 13.618;       // F
-    ioniz_map[6] = 11.26;       // F
-    ioniz_map[9] = 17.423;       // F
-    ioniz_map[14] = 8.152;    // Cl
-    ioniz_map[15] = 10.487;    // Br
-    ioniz_map[16] = 10.36;    // I
-    ioniz_map[17] = 12.968;    // Cl
-    ioniz_map[35] = 11.814;    // Br
-    ioniz_map[53] = 10.451;    // I
-
-
  
     int UpperBoundIndexForNeutralComponents = std::max(segments.upperBoundIndexForGroup[0], segments.upperBoundIndexForGroup[1]);
     UpperBoundIndexForNeutralComponents = std::max(UpperBoundIndexForNeutralComponents, segments.upperBoundIndexForGroup[2]);
@@ -123,11 +107,11 @@ void calculateInteractionMatrix(segmentTypeCollection& segments, Eigen::MatrixXf
             if (param.sw_SR_polarizabilities > 0) {
 
                 if (param.sw_SR_polarizabilities == 7) {
-                    ionizationPotentialCorrection = 1/ioniz_map[segments.SegmentTypeAtomicNumber[i]]/ioniz_map[segments.SegmentTypeAtomicNumber[j]];
+                    ionizationPotentialCorrection = 1/ ioniz_potential_ev[segments.SegmentTypeAtomicNumber[i]]/ ioniz_potential_ev[segments.SegmentTypeAtomicNumber[j]];
                     vdw_val = param.Aeff * param.m_vdW * sqrt(alphai * alphaj * ionizationPotentialCorrection);
                 }
                 else if (param.sw_SR_polarizabilities == 8) {
-                    ionizationPotentialCorrection = 1/(ioniz_map[segments.SegmentTypeAtomicNumber[i]] + ioniz_map[segments.SegmentTypeAtomicNumber[j]]);
+                    ionizationPotentialCorrection = 1/(ioniz_potential_ev[segments.SegmentTypeAtomicNumber[i]] + ioniz_potential_ev[segments.SegmentTypeAtomicNumber[j]]);
                     vdw_val = param.Aeff * param.m_vdW * sqrt(alphai * alphaj) * ionizationPotentialCorrection;
                 }
                 else {
