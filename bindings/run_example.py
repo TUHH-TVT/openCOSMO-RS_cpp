@@ -48,10 +48,10 @@ options = {
 }
 
 # parameters (parameters below are the latest parametrization with polarizability projections: Eq.(24)+𝑤5(Eq.(11))) from https://doi.org/10.1016/j.ces.2025.122170. 
-parameters = {
+parameters = {  
     'Aeff': 4.90825,
-    'alpha': 7322000.0,
-    'CHB': 43421000.0,
+    'alpha': 7876000.0,
+    'CHB': 49318000.0,
     'CHBT': 1.5,
     'SigmaHB': 0.009953,
     'Rav': 0.5,
