@@ -153,6 +153,7 @@ try:
         
         print('ln_gamma                      ', calculations[i]['ln_gamma_x_SR_residual_calc'])
         print('ln_gamma                      ', calculations[i]['ln_gamma_x_SR_combinatorial_calc'])
+
         if options['sw_SR_calculateContactStatisticsAndAdditionalProperties'] > 0:
             print('average_surface_energies      ', calculations[i]['average_surface_energies'][0,0,:,:].sum(1))
             
