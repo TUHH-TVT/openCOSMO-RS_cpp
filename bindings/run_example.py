@@ -48,17 +48,17 @@ options = {
 }
 
 # parameters (parameters below are the latest parametrization with polarizability projections: Eq.(24)+𝑤5(Eq.(11))) from https://doi.org/10.1016/j.ces.2025.122170. 
-parameters = {
+parameters = {  
     'Aeff': 4.90825,
-    'alpha': 7322000.0,
-    'CHB': 43421000.0,
+    'alpha': 7876000.0,
+    'CHB': 49318000.0,
     'CHBT': 1.5,
     'SigmaHB': 0.009953,
     'Rav': 0.5,
     'RavCorr': 1,
     'fCorr': 2.4,
     'comb_SG_z_coord': 0.0,
-    'comb_SG_A_std': 0.0,
+    'comb_SG_A_std': 1.0,
     'comb_modSG_exp': 2.0/3.0,
     'comb_lambda0': 0.463,
     'comb_lambda1': 0.42,
@@ -152,7 +152,7 @@ try:
         print(i + 1)
         
         print('ln_gamma                      ', calculations[i]['ln_gamma_x_SR_residual_calc'])
-
+        print('ln_gamma                      ', calculations[i]['ln_gamma_x_SR_combinatorial_calc'])
         if options['sw_SR_calculateContactStatisticsAndAdditionalProperties'] > 0:
             print('average_surface_energies      ', calculations[i]['average_surface_energies'][0,0,:,:].sum(1))
             
