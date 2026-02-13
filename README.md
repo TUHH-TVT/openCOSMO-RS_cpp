@@ -1,7 +1,7 @@
 
-# openCOSMO-RS
+# openCOSMO-RS (C++) with python bindings
 
-This is an open source implementation of the COSMO-RS model that uses multiple descriptor sigma profiles. The corresponding publication to this repository is:
+This is an open source implementation of the COSMO-RS model that uses multiple descriptor sigma profiles in c++. But it also offers python bindings, so you can call it directly from python. It is orders of magnitude faster than the [pure python version](https://github.com/TUHH-TVT/openCOSMO-RS_py) and it includes newer features and parameterizations earlier. The corresponding publication to this repository is:
 
 #### Clone it 
 >  git clone --recursive --shallow-submodules https://github.com/TUHH-TVT/openCOSMO-RS_cpp.git
