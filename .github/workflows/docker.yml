@@ -1,0 +1,28 @@
+name: Docker Build & Test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build image
+        run: docker build -t opencosmo .
+
+      - name: Verify Python module imports
+        run: docker run --rm opencosmo python3 -c "import openCOSMORS; print('OK')"
+
+      - name: Run Python example
+        run: docker run --rm opencosmo
+
+      - name: Verify CLI binary runs
+        run: docker run --rm opencosmo openCOSMORS 2>&1 | grep -q "input json"
+
+      - name: Check SIMD level
+        run: docker run --rm opencosmo cat /app/.simd_level
