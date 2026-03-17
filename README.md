@@ -79,7 +79,40 @@ This is an open source implementation of the COSMO-RS model that uses multiple d
 #### Running
 > An exemplary file to run the model on python and matlab is included in the bindings folder.
 
+***
+#### Build with Docker
 
+A Dockerfile is provided that builds both the Python module and the standalone CLI binary in a multi-stage build. The SIMD instruction set (SSE3 / AVX / FMA) is **auto-detected** from the build host's CPU at build time.
+
+> **Build the image**
+> ```bash
+> docker build -t opencosmo .
+> ```
+
+> **Run the Python example** (default command)
+> ```bash
+> docker run --rm opencosmo
+> ```
+
+> **Use the Python module interactively**
+> ```bash
+> docker run --rm -it opencosmo python3
+> >>> import openCOSMORS
+> ```
+
+> **Run the standalone CLI binary**
+> ```bash
+> docker run --rm -v /path/to/your/input.json:/data/input.json opencosmo openCOSMORS /data/input.json
+> ```
+
+> **Check which SIMD level was used**
+> ```bash
+> docker run --rm opencosmo cat /app/.simd_level
+> ```
+
+The runtime image contains only Python 3, NumPy, and the compiled artifacts — no build tools.
+
+***
 
 ## Other COSMO-RS related projects
 
