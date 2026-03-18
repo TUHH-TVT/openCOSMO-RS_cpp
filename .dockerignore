@@ -1,0 +1,8 @@
+build*/
+.git/
+*.sln
+*.vcxproj*
+*.bat
+*.pyproj
+__pycache__/
+*.pyd
