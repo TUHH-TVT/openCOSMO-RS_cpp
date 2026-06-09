@@ -8,6 +8,7 @@
 #include "interaction_matrix.hpp"
 #include "contact_statistics.hpp"
 #include "COSMOfile_functions.hpp"
+#include "simd.hpp"
 #include <stdexcept>
 #include <functional>
 #include <iostream>
@@ -59,35 +60,6 @@ void stopCalculationMeasurement() {
     displayTime("addContributions_total_ms              ", addContributions_total_ms);
     displayTime("oneIteration_total_ms                  ", oneIteration_total_ms);
     display("\n");
-}
-#endif
-
-inline float hsum_ps_sse3(__m128 v) {
-    __m128 shuf = _mm_movehdup_ps(v);
-    __m128 sums = _mm_add_ps(v, shuf);
-    shuf = _mm_movehl_ps(shuf, sums);
-    sums = _mm_add_ss(sums, shuf);
-    return _mm_cvtss_f32(sums);
-}
-
-inline double hsum_pd_sse3(__m128d v) {
-    __m128d shuf = _mm_shuffle_pd(v, v, 0x1);
-    __m128d sums = _mm_add_pd(v, shuf);
-    return _mm_cvtsd_f64(sums);
-}
-
-#if defined(__AVX__) || defined(__FMA__)
-inline float hsum256_ps_avx(__m256 v) {
-    __m128 vlow = _mm256_castps256_ps128(v);
-    __m128 vhigh = _mm256_extractf128_ps(v, 1);
-    vlow = _mm_add_ps(vlow, vhigh);
-    return hsum_ps_sse3(vlow);
-}
-inline double hsum256_pd_avx(__m256d v) {
-    __m128d vlow = _mm256_castpd256_pd128(v);
-    __m128d vhigh = _mm256_extractf128_pd(v, 1);
-    vlow = _mm_add_pd(vlow, vhigh);
-    return hsum_pd_sse3(vlow);
 }
 #endif
 
@@ -340,7 +312,6 @@ void averageAndClusterSegments(parameters& param, molecule& _molecule, int appro
 
 inline Eigen::MatrixXd extractAtomicPolarizabilityTensor(molecule& _molecule, int atomIndex) {
 
-    int numberOfAtoms = int(_molecule.atomAtomicNumbers.size());
     Eigen::MatrixXd polarizabilityTensors = _molecule.atomPolarizabilityTensors;
     Eigen::MatrixXd polarizabilityTensor(3,3);
     Eigen::VectorXd polarizabilityTensorLine = polarizabilityTensors.row(atomIndex);
@@ -1077,44 +1048,19 @@ void calculateLnGammaResidual(parameters& param, calculation& _calculation) {
                 calcType* vTauX_1D = &(TauX(0, 0));
                 int idx = 0;
                 int columnSum = 0;
-
+                using SimdCalc = Simd<calcType>;
 
                 for (int j = 0; j < numberOfSegments; j++) {
 
                     columnSum = j * nMultipleOfEight;
 
-#if defined(__AVX__) || defined(__FMA__)//AVX
-#if defined(USE_DOUBLE)
-                    for (int k = lowerBoundIndexForCOSMOSPACECalculation; k < upperBoundIndexForCOSMOSPACECalculation; k += 4) {
+                    for (int k = lowerBoundIndexForCOSMOSPACECalculation; k < upperBoundIndexForCOSMOSPACECalculation; k += SimdCalc::lanes) {
                         idx = columnSum + k;
-
-                        _mm256_store_pd(vTauX_1D + idx, _mm256_mul_pd(_mm256_load_pd(vTau_1D + idx), _mm256_load_pd(vX + k)));
+                        SimdCalc::store(
+                            vTauX_1D + idx,
+                            SimdCalc::mul(SimdCalc::load(vTau_1D + idx), SimdCalc::load(vX + k))
+                        );
                     }
-
-#else
-                    for (int k = lowerBoundIndexForCOSMOSPACECalculation; k < upperBoundIndexForCOSMOSPACECalculation; k += 8) {
-                        idx = columnSum + k;
-
-                        _mm256_store_ps(vTauX_1D + idx, _mm256_mul_ps(_mm256_load_ps(vTau_1D + idx), _mm256_load_ps(vX + k)));
-                    }
-#endif
-
-#else //SSE3
-#if defined(USE_DOUBLE)
-                    for (int k = lowerBoundIndexForCOSMOSPACECalculation; k < upperBoundIndexForCOSMOSPACECalculation; k += 2) {
-                        idx = columnSum + k;
-
-                        _mm_store_pd(vTauX_1D + idx, _mm_mul_pd(_mm_load_pd(vTau_1D + idx), _mm_load_pd(vX + k)));
-                    }
-
-#else
-                    for (int k = lowerBoundIndexForCOSMOSPACECalculation; k < upperBoundIndexForCOSMOSPACECalculation; k += 4) {
-                        idx = columnSum + k;
-
-                        _mm_store_ps(vTauX_1D + idx, _mm_mul_ps(_mm_load_ps(vTau_1D + idx), _mm_load_ps(vX + k)));
-                    }
-#endif
-#endif
 
                 }
             }
@@ -1192,70 +1138,19 @@ void calculateLnGammaResidual(parameters& param, calculation& _calculation) {
 
                         const calcType* vTauX = &(TauX(0, 0));
                         calcType* vGammas = gammas;
+                        using SimdCalc = Simd<calcType>;
 
-#if defined(__FMA__)
+                        SimdCalc::Vec tempVectorSum = SimdCalc::zero();
 
-#if defined(USE_DOUBLE)
-                        __m256d tempVectorSum = _mm256_set_pd(0.0, 0.0, 0.0, 0.0);
-
-                        for (int k = lowerBoundIndexForCOSMOSPACECalculation; k < upperBoundIndexForCOSMOSPACECalculation; k += 4) {
-                            tempVectorSum = _mm256_fmadd_pd(_mm256_load_pd(vTauX + columnSum + k), _mm256_load_pd(vGammas + k), tempVectorSum); //FMA
-                            //tempVectorSum = _mm256_add_pd(_mm256_mul_pd(_mm256_load_pd(vTauX + columnSum + k), _mm256_load_pd(vGammas + k)), tempVectorSum); //AVX
+                        for (int k = lowerBoundIndexForCOSMOSPACECalculation; k < upperBoundIndexForCOSMOSPACECalculation; k += SimdCalc::lanes) {
+                            tempVectorSum = SimdCalc::fmadd(
+                                SimdCalc::load(vTauX + columnSum + k),
+                                SimdCalc::load(vGammas + k),
+                                tempVectorSum
+                            );
                         }
 
-                        newGamma = hsum256_pd_avx(tempVectorSum);
-
-#else
-                        __m256 tempVectorSum = _mm256_set_ps(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
-
-                        for (int k = lowerBoundIndexForCOSMOSPACECalculation; k < upperBoundIndexForCOSMOSPACECalculation; k += 8) {
-                            tempVectorSum = _mm256_fmadd_ps(_mm256_load_ps(vTauX + columnSum + k), _mm256_load_ps(vGammas + k), tempVectorSum); //FMA
-                        }
-
-                        newGamma = double(hsum256_ps_avx(tempVectorSum));
-#endif
-
-#elif defined(__AVX__)
-#if defined(USE_DOUBLE)
-                        __m256d tempVectorSum = _mm256_set_pd(0.0, 0.0, 0.0, 0.0);
-
-                        for (int k = lowerBoundIndexForCOSMOSPACECalculation; k < upperBoundIndexForCOSMOSPACECalculation; k += 4) {
-                            tempVectorSum = _mm256_add_pd(_mm256_mul_pd(_mm256_load_pd(vTauX + columnSum + k), _mm256_load_pd(vGammas + k)), tempVectorSum); //AVX
-                        }
-
-                        newGamma = hsum256_pd_avx(tempVectorSum);
-
-#else
-                        __m256 tempVectorSum = _mm256_set_ps(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
-
-                        for (int k = lowerBoundIndexForCOSMOSPACECalculation; k < upperBoundIndexForCOSMOSPACECalculation; k += 8) {
-                            //tempSum += hsum256_ps_avx(_mm256_mul_ps(_mm256_load_ps(vTauX + columnSum + k), _mm256_load_ps(vGammas + k))); // less accurate
-                            tempVectorSum = _mm256_add_ps(_mm256_mul_ps(_mm256_load_ps(vTauX + columnSum + k), _mm256_load_ps(vGammas + k)), tempVectorSum); //AVX
-                        }
-                        newGamma = double(hsum256_ps_avx(tempVectorSum));
-#endif
-
-#else//SSE3
-#if defined(USE_DOUBLE)
-                        __m128d tempVectorSum = _mm_setr_pd(0.0, 0.0);
-
-                        for (int k = lowerBoundIndexForCOSMOSPACECalculation; k < upperBoundIndexForCOSMOSPACECalculation; k += 2) {
-                            tempVectorSum = _mm_add_pd(_mm_mul_pd(_mm_load_pd(vTauX + columnSum + k), _mm_load_pd(vGammas + k)), tempVectorSum); //SSE
-                        }
-
-                        newGamma = hsum_pd_sse3(tempVectorSum);
-
-#else
-                        __m128 tempVectorSum = _mm_setr_ps(0.0, 0.0, 0.0, 0.0);
-
-                        for (int k = lowerBoundIndexForCOSMOSPACECalculation; k < upperBoundIndexForCOSMOSPACECalculation; k += 4) {
-                            tempVectorSum = _mm_add_ps(_mm_mul_ps(_mm_load_ps(vTauX + columnSum + k), _mm_load_ps(vGammas + k)), tempVectorSum); //SSE
-                        }
-
-                        newGamma = double(hsum_ps_sse3(tempVectorSum));
-#endif
-
-#endif
+                        newGamma = double(SimdCalc::horizontal_sum(tempVectorSum));
                 }
 
                     newGamma = 1 / newGamma;

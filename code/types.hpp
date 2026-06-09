@@ -16,9 +16,6 @@
 #include <mutex>
 
 
-// always include this as at least SSE3 is required
-#include <immintrin.h>
-
 // Constants
 #define PI 3.14159265358979323846
 #define R_GAS_CONSTANT 8.31446261815324

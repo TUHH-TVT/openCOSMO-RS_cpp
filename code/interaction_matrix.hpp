@@ -8,7 +8,6 @@
 
 #include "helper_functions.hpp"
 #include <stdexcept>
-#include <immintrin.h>// always include this as at least SSE3 is required
 #include <cmath>
 #include <map>
 // returns lower left triangular matrices, this is because this way the matrix is accessed in sequential order in memory

@@ -6,18 +6,20 @@
 
 #pragma once
 
-// to change the vectorization level go to the project properties:
-// Configuration Properties > C/C++ > Code Generation > Enable Enhanced Instruction Set > Dropdown
-// please do not define in this file as compilation in linux will fail
-// 
-// SSE3 is the minimum vectorization level supported, the code will not run on a machine not supporting it
-// MSVC compiler does not provide the __FMA__ macro, but every Intel processor having __AVX2__ also has __FMA__:
-#if !defined(__FMA__) && defined(__AVX2__)
-#define __FMA__ 1
+// CMake sets one OPENCOMSORS_SIMD_* macro. If the project is built outside
+// CMake, choose a conservative backend from compiler-provided architecture macros.
+#if !defined(OPENCOMSORS_SIMD_FMA) && !defined(OPENCOMSORS_SIMD_AVX) && !defined(OPENCOMSORS_SIMD_SSE3) && !defined(OPENCOMSORS_SIMD_NEON) && !defined(OPENCOMSORS_SIMD_SCALAR)
+#if defined(__FMA__)
+#define OPENCOMSORS_SIMD_FMA 1
+#elif defined(__AVX__)
+#define OPENCOMSORS_SIMD_AVX 1
+#elif defined(__SSE3__)
+#define OPENCOMSORS_SIMD_SSE3 1
+#elif defined(__aarch64__) || defined(_M_ARM64)
+#define OPENCOMSORS_SIMD_NEON 1
+#else
+#define OPENCOMSORS_SIMD_SCALAR 1
 #endif
-
-#if !defined(__SSE3__) && !defined(__AVX__) && !defined(__FMA__)  
-#error Please specify exactly one of the following compiler switches to set the vectorization level: SSE3, AVX, FMA, AVX2
 #endif
 
 // to change the OpenMP settings go to the project properties to:
@@ -42,16 +44,21 @@ std::string OPENMP_parallelization = "      openmp: deactivated";
 #pragma message("       openmp: deactivated")
 #endif
 
-#if defined(__FMA__)
+#if defined(OPENCOMSORS_SIMD_FMA)
 #pragma message("vectorization: FMA")
 std::string vectorization_level = "vectorization: FMA";
-#elif defined(__AVX__)
+#elif defined(OPENCOMSORS_SIMD_AVX)
 #pragma message("vectorization: AVX")
 std::string vectorization_level = "vectorization: AVX";
-#else
-#define __SSE3__ 1
+#elif defined(OPENCOMSORS_SIMD_SSE3)
 #pragma message("vectorization: SSE3")
 std::string vectorization_level = "vectorization: SSE3";
+#elif defined(OPENCOMSORS_SIMD_NEON)
+#pragma message("vectorization: NEON")
+std::string vectorization_level = "vectorization: NEON";
+#else
+#pragma message("vectorization: SCALAR")
+std::string vectorization_level = "vectorization: SCALAR";
 #endif
 
 #if defined(__GNUC__)

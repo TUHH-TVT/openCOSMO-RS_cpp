@@ -136,7 +136,7 @@ void loadMoleculesOnPython(py::dict options, py::dict parameters, py::list compo
 	param.sw_atomicNumber = options["sw_SR_atomicNumber"].cast<int>();
 	param.sw_misfit = options["sw_SR_misfit"].cast<int>();
 
-	if (param.sw_misfit < 0 && param.sw_misfit > 2) {
+	if (param.sw_misfit < 0 || param.sw_misfit > 2) {
 		throw std::runtime_error("sw_SR_misfit should have one of the following values: [0, 1, 2].");
 	}
 	param.sw_skip_COSMOSPACE_errors = options["sw_skip_COSMOSPACE_errors"].cast<int>();
