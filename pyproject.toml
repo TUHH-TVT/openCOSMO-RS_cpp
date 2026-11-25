@@ -40,8 +40,8 @@ OPENCOSMORS_PRECISION = "DOUBLE"
 [tool.cibuildwheel]
 build = "cp311-* cp312-* cp313-* cp314-*"
 skip = "*-musllinux_* *-win32 *_i686"
-test-requires = ["numpy"]
-test-command = "python {project}/tests/smoke_test.py"
+test-requires = ["numpy", "pytest"]
+test-command = "pytest {project}/tests -q"
 build-verbosity = 1
 
 # SIMD backend of the wheels. The default AUTO selects FMA on x86_64, which is not
