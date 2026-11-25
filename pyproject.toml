@@ -1,0 +1,66 @@
+[build-system]
+requires = ["scikit-build-core>=0.10", "pybind11>=3.1"]
+build-backend = "scikit_build_core.build"
+
+[project]
+name = "opencosmors"
+version = "0.1.0"
+description = "C++ implementation of openCOSMO-RS with Python bindings"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "LGPL-3.0-only"
+license-files = ["LICENSE"]
+dependencies = ["numpy"]
+classifiers = [
+    "Programming Language :: C++",
+    "Programming Language :: Python :: 3",
+    "Operating System :: OS Independent",
+]
+
+[project.urls]
+Homepage = "https://github.com/TUHH-TVT/openCOSMO-RS_cpp"
+
+[tool.scikit-build]
+minimum-version = "build-system.requires"
+build-dir = "build/{wheel_tag}"
+wheel.packages = []
+cmake.build-type = "Release"
+# the Eigen and pybind11 submodules are large, ship only what the build needs
+sdist.exclude = [
+    "eigen/doc", "eigen/test", "eigen/bench", "eigen/demos", "eigen/failtest",
+    "eigen/blas", "eigen/lapack", "eigen/ci", "eigen/scripts",
+    "pybind11/docs", "pybind11/tests", "pybind11/.github",
+    ".vs", "build", "*.sln", "*.vcxproj*", "*.pyproj", "*.bat",
+]
+
+[tool.scikit-build.cmake.define]
+# precision: DOUBLE (default) or SINGLE; override with -C cmake.define.OPENCOSMORS_PRECISION=SINGLE
+OPENCOSMORS_PRECISION = "DOUBLE"
+
+[tool.cibuildwheel]
+build = "cp311-* cp312-* cp313-* cp314-*"
+skip = "*-musllinux_* *-win32 *_i686"
+test-requires = ["numpy"]
+test-command = "python {project}/tests/smoke_test.py"
+build-verbosity = 1
+
+# SIMD backend of the wheels. The default AUTO selects FMA on x86_64, which is not
+# available on every CPU/VM, so the portable AVX baseline is used instead.
+[tool.cibuildwheel.linux]
+environment = { CMAKE_ARGS = "-DOPENCOMSORS_SIMD=AVX" }
+[[tool.cibuildwheel.overrides]]
+select = "*-manylinux_aarch64"
+inherit.environment = "none"
+environment = { CMAKE_ARGS = "-DOPENCOMSORS_SIMD=NEON" }
+
+[tool.cibuildwheel.windows]
+environment = { CMAKE_ARGS = "-DOPENCOMSORS_SIMD=AVX" }
+# bundle the MSVC OpenMP runtime (vcomp140.dll) so no VC++ redistributable is required
+before-build = "pip install delvewheel"
+repair-wheel-command = "delvewheel repair -w {dest_dir} {wheel}"
+
+# Apple clang has no OpenMP. The workflow installs conda-forge's llvm-openmp into
+# $OMP_PREFIX (a micromamba environment), delocate bundles libomp.dylib into the wheel.
+[tool.cibuildwheel.macos]
+archs = ["arm64"]
+environment = { MACOSX_DEPLOYMENT_TARGET = "11.0", DYLD_LIBRARY_PATH = "$OMP_PREFIX/lib", CMAKE_ARGS = "-DOPENCOMSORS_SIMD=NEON -DOpenMP_CXX_FLAGS='-Xpreprocessor -fopenmp -I$OMP_PREFIX/include' -DOpenMP_CXX_LIB_NAMES=omp -DOpenMP_omp_LIBRARY=$OMP_PREFIX/lib/libomp.dylib" }

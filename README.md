@@ -97,6 +97,27 @@ cmake -S . -B build -DOPENCOMSORS_SIMD=FMA
 cmake -S . -B build -DOPENCOMSORS_SIMD=NEON
 ```
 
+### Precision
+
+The floating point precision of the calculation is selected with
+`OPENCOSMORS_PRECISION`: `DOUBLE` (default) or `SINGLE`. Single precision is
+faster, but results agree with double precision only to about 1e-5.
+
+```bash
+cmake -S . -B build -DOPENCOSMORS_PRECISION=SINGLE
+pip install . -C cmake.define.OPENCOSMORS_PRECISION=SINGLE
+```
+
+The Python module is called `openCOSMORS` in both cases.
+
+### Install as a wheel
+
+`pip install .` builds and installs the module with scikit-build-core. The
+GitHub Actions workflow `.github/workflows/wheels.yml` builds wheels for
+Linux (x86_64, aarch64), Windows (x86_64) and macOS (arm64) for Python
+3.11 to 3.14 and publishes them to PyPI when a tag `v*` is pushed. The wheels
+use the portable `AVX` backend on x86_64 and `NEON` on ARM64.
+
 ### Platform notes
 
 **macOS**

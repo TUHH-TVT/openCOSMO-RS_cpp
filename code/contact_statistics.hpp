@@ -51,10 +51,10 @@ void calculateContactStatistics(calculation& _calculation, MatrixCalcType& A_int
 
 			// i_concentration is the internal (sorted) index, the output is filled from the temporary array afterwards
 			temporary_contactStatistics(i_concentration, mol_i, mol_j) = weighting.sum() * factor / N_mol(mol_i);
-			temporary_averageInteractionEnergies(i_concentration, 0, mol_i, mol_j) = N_AVOGADRO * 0.5 * factor * (weighting * A_int.array()).sum();
+			temporary_averageInteractionEnergies(i_concentration, 0, mol_i, mol_j) = 0.5 * factor * (weighting * A_int.array()).sum();
 
 			for (int k = 0; k < param.numberOfPartialInteractionMatrices; k++) {
-				temporary_averageInteractionEnergies(i_concentration, k + 1, mol_i, mol_j) = N_AVOGADRO * 0.5 * factor * (weighting * partialInteractionMatrices[k].array()).sum();
+				temporary_averageInteractionEnergies(i_concentration, k + 1, mol_i, mol_j) = 0.5 * factor * (weighting * partialInteractionMatrices[k].array()).sum();
 			}
 		}
 	}
