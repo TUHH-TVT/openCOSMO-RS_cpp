@@ -613,11 +613,7 @@ py::list calculateOnPython(py::dict parameters, py::list calculationsOnPython, b
 
 }
 
-#ifdef USE_DOUBLE
-PYBIND11_MODULE(openCOSMORS_double, m) {
-#else
 PYBIND11_MODULE(openCOSMORS, m) {
-#endif
 	m.doc() = R"pbdoc(
         openCOSMO-RS
         -----------------------

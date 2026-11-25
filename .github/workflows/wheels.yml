@@ -1,0 +1,72 @@
+name: Build wheels
+
+on:
+  push:
+    branches: [main, ci-wheels]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build_wheels:
+    name: Wheels on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, ubuntu-24.04-arm, windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+
+      # OpenMP runtime for macOS (Apple clang ships none), taken from conda-forge
+      - uses: mamba-org/setup-micromamba@v3.2.1
+        if: runner.os == 'macOS'
+        with:
+          environment-name: omp
+          create-args: llvm-openmp
+          condarc: |
+            channels:
+              - conda-forge
+      - name: Locate llvm-openmp
+        if: runner.os == 'macOS'
+        run: echo "OMP_PREFIX=$MAMBA_ROOT_PREFIX/envs/omp" >> "$GITHUB_ENV"
+
+      - uses: pypa/cibuildwheel@v3.4.1
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: wheels-${{ matrix.os }}
+          path: wheelhouse/*.whl
+
+  build_sdist:
+    name: Source distribution
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+
+      - run: pipx run build --sdist
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: sdist
+          path: dist/*.tar.gz
+
+  publish:
+    name: Publish to PyPI
+    needs: [build_wheels, build_sdist]
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    environment: pypi
+    permissions:
+      id-token: write   # trusted publishing, configure the publisher on pypi.org
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          path: dist
+          merge-multiple: true
+
+      - uses: pypa/gh-action-pypi-publish@release/v1
