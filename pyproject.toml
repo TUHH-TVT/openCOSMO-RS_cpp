@@ -4,7 +4,7 @@ build-backend = "scikit_build_core.build"
 
 [project]
 name = "opencosmors"
-version = "0.1.0"
+version = "1.0.0"
 description = "C++ implementation of openCOSMO-RS with Python bindings"
 readme = "README.md"
 requires-python = ">=3.11"
