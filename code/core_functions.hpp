@@ -15,6 +15,7 @@
 
 
 #if defined(MEASURE_TIME) 
+#include <atomic>
 #include <chrono>
 std::atomic<unsigned long> oneIteration_total_ms = 0;
 std::chrono::high_resolution_clock::time_point oneIteration_last;
@@ -70,9 +71,18 @@ void initialize(parameters& param, bool initializeParameters = true, bool initia
         n_ex = 0;
         param.ChargeRaster.clear();
         param.exp_param.clear();
-        param.R_i = std::vector<double>(118, 0.0);
-        param.R_i_COSMO = std::vector<double>(118, 0.0);
-        param.HBClassElmnt = std::vector<int>(300, 0);
+        param.R_i = std::vector<double>(NUMBER_OF_ELEMENT_SLOTS, 0.0);
+        param.R_i_COSMO = std::vector<double>(NUMBER_OF_ELEMENT_SLOTS, 0.0);
+        param.HBClassElmnt = std::vector<int>(NUMBER_OF_ELEMENT_SLOTS, 0);
+
+        // only set if polarizabilities are used, reset to not keep values from a previous run
+        param.E_F_corr = 0.0;
+        param.m_vdW = 0.0;
+
+        // only set if solvation energies are calculated, reset to not keep values from a previous run
+        param.dGsolv_tau = std::vector<double>(NUMBER_OF_ELEMENT_SLOTS, 0.0);
+        param.dGsolv_E_gas.clear();
+        param.dGsolv_numberOfAtomsInRing.clear();
 
         // Initialize hydrogen bond classes of the elements HBClassElmnt
         // 0 : only non HB  | 1 : potential donor  | 2 : potential acceptor | 3 : potential donor or acceptor
@@ -111,14 +121,86 @@ void initialize(parameters& param, bool initializeParameters = true, bool initia
         }
     }
 
-    if (initializeMolecules)
+    if (initializeMolecules) {
         molecules.clear();
+        monoatomicCationsResized = false;
+        sigmaProfilesUsedInCalculation = false;
+    }
 
     if (initializeCalculations)
         calculations.clear();
 
     if (showBinarySpecs)
         display("\nBINARY SPECS\n-------------------------\n" + compilation_mode + "\n" + OPENMP_parallelization + "\n" + vectorization_level + "\n" + precision + "\n-------------------------\n\n");
+}
+
+// dGsolv_E_gas and dGsolv_numberOfAtomsInRing are given per loaded molecule
+void validateSolvationEnergyParameters(const parameters& param, int numberOfMolecules) {
+    if (param.dGsolv_E_gas.size() == 0 && param.dGsolv_numberOfAtomsInRing.size() == 0) {
+        return;
+    }
+    if (int(param.dGsolv_E_gas.size()) != numberOfMolecules) {
+        throw std::runtime_error("dGsolv_E_gas has " + std::to_string(param.dGsolv_E_gas.size()) + " entries, but " + std::to_string(numberOfMolecules) +
+            " molecules are loaded. One gas phase energy per loaded molecule (in the order of the component paths) is needed.");
+    }
+    if (int(param.dGsolv_numberOfAtomsInRing.size()) != numberOfMolecules) {
+        throw std::runtime_error("dGsolv_numberOfAtomsInRing has " + std::to_string(param.dGsolv_numberOfAtomsInRing.size()) + " entries, but " + std::to_string(numberOfMolecules) +
+            " molecules are loaded. One entry per loaded molecule (in the order of the component paths) is needed.");
+    }
+}
+
+// checks the sizes of the input of one calculation before it is read
+void validateCalculationSizes(int calculationNumber, int numberOfComponents, const std::vector<int>& componentIndices, int numberOfLoadedMolecules,
+    int numberOfRows, int numberOfColumns, int numberOfTemperatures, int numberOfReferenceStateTypes, int numberOfReferenceStateRows) {
+
+    const std::string prefix = "Calculation number " + std::to_string(calculationNumber) + ": ";
+
+    if (numberOfComponents == 0) {
+        throw std::runtime_error(prefix + "'component_indices' is empty.");
+    }
+    for (int index : componentIndices) {
+        if (index < 0 || index >= numberOfLoadedMolecules) {
+            throw std::runtime_error(prefix + "the component index " + std::to_string(index) + " is invalid, " + std::to_string(numberOfLoadedMolecules) + " molecules were loaded.");
+        }
+    }
+    if (numberOfRows == 0) {
+        throw std::runtime_error(prefix + "'concentrations' does not contain any row.");
+    }
+    if (numberOfRows > 65535) {
+        throw std::runtime_error(prefix + "'concentrations' has " + std::to_string(numberOfRows) + " rows, at most 65535 rows (including the reference states) are possible per calculation. Please split the calculation.");
+    }
+    if (numberOfColumns != numberOfComponents) {
+        throw std::runtime_error(prefix + "'concentrations' has " + std::to_string(numberOfColumns) + " columns, but " + std::to_string(numberOfComponents) + " components were given in 'component_indices'.");
+    }
+    if (numberOfTemperatures != numberOfRows) {
+        throw std::runtime_error(prefix + "'temperatures' has " + std::to_string(numberOfTemperatures) + " entries, but 'concentrations' has " + std::to_string(numberOfRows) + " rows.");
+    }
+    if (numberOfReferenceStateTypes != numberOfRows) {
+        throw std::runtime_error(prefix + "'reference_state_types' has " + std::to_string(numberOfReferenceStateTypes) + " entries, but 'concentrations' has " + std::to_string(numberOfRows) + " rows.");
+    }
+    if (numberOfReferenceStateRows != numberOfRows) {
+        throw std::runtime_error(prefix + "'reference_state_concentrations' has " + std::to_string(numberOfReferenceStateRows) + " rows, but 'concentrations' has " + std::to_string(numberOfRows) + " rows.");
+    }
+}
+
+// returns the index of the charge raster point left of sigma, throws if sigma is outside of the charge raster
+int getLeftChargeRasterIndex(const parameters& param, double sigma, const std::string& description, const std::string& moleculeName) {
+
+    // range check in floating point before converting to int (converting NaN or huge values to int is undefined)
+    const double position = std::floor((sigma - param.sigmaMin) / param.sigmaStep);
+    const int numberOfRasterPoints = int(param.ChargeRaster.size());
+
+    int index = -1;
+    if (std::isfinite(position) && position >= 0 && position <= double(numberOfRasterPoints - 2)) {
+        index = int(position);
+    }
+
+    if (index < 0) {
+        throw std::runtime_error("The " + description + " of a segment of molecule '" + moleculeName + "' is " + std::to_string(sigma) +
+            " e/A^2, which is outside of the charge raster [" + std::to_string(param.sigmaMin) + ", " + std::to_string(param.sigmaMax) + "] e/A^2.");
+    }
+
+    return index;
 }
 
 void averageAndClusterSegments(parameters& param, molecule& _molecule, int approximateNumberOfSegmentTypes = 0) {
@@ -193,7 +275,7 @@ void averageAndClusterSegments(parameters& param, molecule& _molecule, int appro
                 throw std::runtime_error("The QSPR model for the molar volume only works for the quantum chemistry method DFT_BP86_def2-TZVPD_SP");
             }
             else {
-                warnings.push_back(" - The QSPR model for the molar volume was parametrized using a different quantum chemistry method than the one you are using. Recommended method: DFT_BP86_def2-TZVPD_SP");
+                addWarning(" - The QSPR model for the molar volume was parametrized using a different quantum chemistry method than the one you are using. Recommended method: DFT_BP86_def2-TZVPD_SP");
             }
         }
 
@@ -263,11 +345,11 @@ void averageAndClusterSegments(parameters& param, molecule& _molecule, int appro
     double AsigmaRightSigmaCorrLeft = -1;
     double AsigmaRightSigmaCorrRight = -1;
 
-    unsigned short ind_SigmaCorr_left = 0;
+    int ind_SigmaCorr_left = 0;
 
     for (int j = 0; j < numberOfSegments; j++) {
 
-        unsigned short ind_Sigma_left = int((averagedSigmas(j) - param.sigmaMin) / param.sigmaStep);
+        int ind_Sigma_left = getLeftChargeRasterIndex(param, averagedSigmas(j), "averaged screening charge density (sigma)", _molecule.name);
 
         sigmaLeft = param.ChargeRaster[ind_Sigma_left];
         sigmaRight = param.ChargeRaster[ind_Sigma_left + 1];
@@ -277,7 +359,7 @@ void averageAndClusterSegments(parameters& param, molecule& _molecule, int appro
 
 
         if (calculateMisfitCorrelation == true) {
-            ind_SigmaCorr_left = int((averagedSigmaCorrs(j) - param.sigmaMin) / param.sigmaStep);
+            ind_SigmaCorr_left = getLeftChargeRasterIndex(param, averagedSigmaCorrs(j), "correlation screening charge density (sigmaCorr)", _molecule.name);
 
             sigmaCorrLeft = param.ChargeRaster[ind_SigmaCorr_left];
             sigmaCorrRight = param.ChargeRaster[ind_SigmaCorr_left + 1];
@@ -353,6 +435,16 @@ void projectSegments(parameters& param, molecule& _molecule) {
         }
     }
     else {
+        const int mode = param.sw_SR_polarizabilities;
+        if (mode != 1 && mode != 3 && mode != 5 && mode != 6 && mode != 7 && mode != 8) {
+            throw std::runtime_error("sw_SR_polarizabilities = " + std::to_string(mode) + " is not supported. Possible values are: 0, 1, 3, 5, 6, 7, 8.");
+        }
+
+        if (_molecule.atomPolarizabilityTensors.rows() != numberOfAtoms || _molecule.atomPolarizabilityTensors.cols() != 6) {
+            throw std::runtime_error("The COSMO file of molecule '" + _molecule.name + "' does not contain atomic polarizabilities for all " + std::to_string(numberOfAtoms) +
+                " atoms, which are needed for sw_SR_polarizabilities > 0. Please use ORCA COSMO files containing the section '#ATOMIC POLARIZABILITIES'.");
+        }
+
         for (int segmentIndexI = 0; segmentIndexI < numberOfSegments; segmentIndexI++) {
             int atomIndex = segmentAtomIndex(segmentIndexI);
             areaOfAtom(atomIndex) = areaOfAtom(atomIndex) + surfaceAreasInAu(segmentIndexI);
@@ -363,7 +455,7 @@ void projectSegments(parameters& param, molecule& _molecule) {
         for (int segmentIndexI = 0; segmentIndexI < numberOfSegments; segmentIndexI++) {
             int atomIndex = segmentAtomIndex(segmentIndexI);
             for (int k = 0; k < 3; k++) {
-                distanceSegmentAtom(k) = abs(surfaceCoordinatesInAu(segmentIndexI, k) - atomCoordinatesInAu(atomIndex, k));
+                distanceSegmentAtom(k) = std::abs(surfaceCoordinatesInAu(segmentIndexI, k) - atomCoordinatesInAu(atomIndex, k));
             }
             double distanceSegmentAtom_norm = distanceSegmentAtom(0) + distanceSegmentAtom(1) + distanceSegmentAtom(2);
             distanceSegmentAtom = distanceSegmentAtom / distanceSegmentAtom_norm;
@@ -374,6 +466,10 @@ void projectSegments(parameters& param, molecule& _molecule) {
 
             polarizability_projection = tmp_vec.norm();
 
+            // The projections are clustered by rounding on purpose (Grigorash et al., Chem. Eng. Sci. 319 (2026) 122170,
+            // Sect. 3.1.3 and Table 3): grid step 10 for unscaled projections and the scaling w5 (modes 5 to 8),
+            // grid step 0.1 for the scalings w1 (mode 1) and w3 (mode 3). The parameters were fitted with these grids.
+            // round_and_truncate(x, n) rounds to multiples of 10^n.
             if (param.sw_SR_polarizabilities == 5) {
                 polarizability_projection = round_and_truncate(polarizability_projection, 1);
             }
@@ -422,6 +518,32 @@ molecule loadNewMolecule(parameters& param, std::string componentPath) {
     newMolecule.name = trim(parts[0]);
 
     // if sigma profile not yet loaded
+    // check the data read from the COSMO file
+    {
+        const int numberOfAtoms = int(newMolecule.atomAtomicNumbers.size());
+        const int numberOfSegments = int(newMolecule.segmentAreas.size());
+
+        if (numberOfAtoms == 0) {
+            throw std::runtime_error("No atoms were found in the COSMO file: " + componentPath);
+        }
+        if (numberOfSegments == 0) {
+            throw std::runtime_error("No surface segments were found in the COSMO file: " + componentPath);
+        }
+        if (!std::isfinite(newMolecule.Area) || newMolecule.Area <= 0 || !std::isfinite(newMolecule.Volume) || newMolecule.Volume <= 0) {
+            throw std::runtime_error("The cavity area and volume could not be read from the COSMO file: " + componentPath);
+        }
+        for (int i = 0; i < numberOfSegments; i++) {
+            const int atomIndex = newMolecule.segmentAtomIndices(i);
+            if (atomIndex < 0 || atomIndex >= numberOfAtoms) {
+                throw std::runtime_error("Surface segment " + std::to_string(i) + " refers to the atom index " + std::to_string(atomIndex) +
+                    ", but the molecule has " + std::to_string(numberOfAtoms) + " atoms. COSMO file: " + componentPath);
+            }
+            if (!(newMolecule.segmentAreas(i) > 0) || !std::isfinite(newMolecule.segmentSigmas(i))) {
+                throw std::runtime_error("Surface segment " + std::to_string(i) + " has an invalid area or charge. COSMO file: " + componentPath);
+            }
+        }
+    }
+
     if (newMolecule.segments.size() == 0) {
         double sumOfScreeningCharge = (newMolecule.segmentAreas.array() * newMolecule.segmentSigmas.array()).matrix().sum();
         newMolecule.moleculeCharge = (signed char)(std::round(-1.0f * sumOfScreeningCharge));
@@ -489,10 +611,14 @@ molecule loadNewMolecule(parameters& param, std::string componentPath) {
         // giving the abbility to differentiate between hydrogen atoms depending on the atom they are bound to.
         if (param.sw_differentiateHydrogens == 1) {
 
+            // the original atomic numbers are used, so that already relabeled hydrogens are still
+            // recognized as hydrogens (e.g. H2 gets 101 for both hydrogen atoms)
+            const Eigen::VectorXi originalAtomicNumbers = newMolecule.atomAtomicNumbers;
+
             for (int atomIndexI = 0; atomIndexI < numberOfAtoms; atomIndexI++) {
                 double minimumDistanceAtomIAtomJSquared = 10e14;
                 int closestAtomIndex = -1;
-                if (newMolecule.atomAtomicNumbers(atomIndexI) != 1) {
+                if (originalAtomicNumbers(atomIndexI) != 1) {
                     continue;
                 }
 
@@ -502,8 +628,8 @@ molecule loadNewMolecule(parameters& param, std::string componentPath) {
                         continue;
                     }
 
-                    // search for next atom that is not a Hydrogen unless tmolecule is H2
-                    if (newMolecule.atomAtomicNumbers(atomIndexJ) == 1 && newMolecule.atomAtomicNumbers(atomIndexJ) < 100 && numberOfAtoms != 2) {
+                    // search for next atom that is not a Hydrogen unless the molecule is H2
+                    if (originalAtomicNumbers(atomIndexJ) == 1 && numberOfAtoms != 2) {
                         continue;
                     }
 
@@ -512,7 +638,10 @@ molecule loadNewMolecule(parameters& param, std::string componentPath) {
                         closestAtomIndex = atomIndexJ;
                     }
                 }
-                int newAtomicNumber = 100 + newMolecule.atomAtomicNumbers(closestAtomIndex);
+                if (closestAtomIndex == -1) {
+                    throw std::runtime_error("sw_SR_differentiateHydrogens = 1: no bonding partner was found for hydrogen atom " + std::to_string(atomIndexI) + " of molecule '" + newMolecule.name + "'.");
+                }
+                int newAtomicNumber = 100 + originalAtomicNumbers(closestAtomIndex);
                 newMolecule.atomAtomicNumbers(atomIndexI) = newAtomicNumber;
                 param.R_i_COSMO[newAtomicNumber] = param.R_i_COSMO[1];
             }
@@ -542,7 +671,7 @@ molecule loadNewMolecule(parameters& param, std::string componentPath) {
 
 #ifdef DEBUG_INFO
     newMolecule.segments.sort();
-    WriteExtendedSigmaProfiletoFile(newMolecule.name + ".extsp", newMolecule.segments);
+    WriteExtendedSigmaProfileToFile(newMolecule.name + ".extsp", newMolecule.segments);
 #endif
 
     return newMolecule;
@@ -555,13 +684,37 @@ void reloadAllMolecules() {
 #endif
     for (int i = 0; i < molecules.size(); i++) {
         e.run([=] {
-            molecule _molecule = *molecules[i];
+            // reference: the reloaded sigma profile has to be stored in the loaded molecule
+            molecule& _molecule = *molecules[i];
             int previousNumberOfSegmentTypes = int(_molecule.segments.size());
             _molecule.segments.clear();
+            // the polarizability projections of modes 6 to 8 depend on Rav as well
+            projectSegments(param, _molecule);
             averageAndClusterSegments(param, _molecule, previousNumberOfSegmentTypes);
             });
     }
+
+    // the segment types of all calculations have to be rebuilt from the reloaded sigma profiles,
+    // also if the reload failed for some molecules
+    for (calculation& _calculation : calculations) {
+        _calculation.sigmaProfilesOutdated = true;
+    }
+
     e.rethrow();
+}
+
+// sets area and volume of monoatomic cations from the given radii, needed once after loading the molecules
+// or whenever the radii change (sw_alwaysCalculateSizeRelatedParameters == 1)
+void resizeMonoatomicCations(parameters& param, std::vector<std::shared_ptr<molecule>> molecules);
+
+void prepareMoleculesForCalculation(parameters& param) {
+    if (param.sw_alwaysReloadSigmaProfiles == 1 && sigmaProfilesUsedInCalculation) {
+        reloadAllMolecules();
+    }
+    if (param.sw_alwaysCalculateSizeRelatedParameters == 1 || !monoatomicCationsResized) {
+        resizeMonoatomicCations(param, molecules);
+        monoatomicCationsResized = true;
+    }
 }
 
 void resizeMonoatomicCations(parameters& param, std::vector<std::shared_ptr<molecule>> molecules) {
@@ -574,6 +727,10 @@ void resizeMonoatomicCations(parameters& param, std::vector<std::shared_ptr<mole
         if (molecules[i]->moleculeGroup == 3) {
             int AN = molecules[i]->atomAtomicNumbers(0);
             double R_i = param.R_i[AN];
+            if (!(R_i > 0)) {
+                throw std::runtime_error("No radius was given for the monoatomic cation '" + molecules[i]->name + "' (atomic number " + std::to_string(AN) +
+                    "). With sw_SR_differentiateMoleculeGroups = 1 the radius of every monoatomic cation has to be given in parameters['radii'].");
+            }
             molecules[i]->Area = (4 * PI * R_i * R_i);
             molecules[i]->Volume = (4.0 / 3 * PI * R_i * R_i * R_i);
         }
@@ -588,17 +745,21 @@ void rescaleSegments(parameters& param, calculation& _calculation) {
     if (_calculation.segments.numberOfSegmentsForGroup[3] != 0) {
 
         // monoatomic cation
-        std::unordered_map<unsigned short, int[2]> segmentIndicesBelongingToASpecificAtomicNumber;
+        std::unordered_map<unsigned short, std::array<int, 2>> segmentIndicesBelongingToASpecificAtomicNumber;
         for (int j = _calculation.segments.lowerBoundIndexForGroup[3];
             j < _calculation.segments.upperBoundIndexForGroup[3]; j++) {
 
             unsigned short AN = _calculation.segments.SegmentTypeAtomicNumber[j];
 
-            if (segmentIndicesBelongingToASpecificAtomicNumber.find(AN) == segmentIndicesBelongingToASpecificAtomicNumber.end()) {
-                segmentIndicesBelongingToASpecificAtomicNumber[AN][0] = (unsigned short)j;
+            auto found = segmentIndicesBelongingToASpecificAtomicNumber.find(AN);
+            if (found == segmentIndicesBelongingToASpecificAtomicNumber.end()) {
+                segmentIndicesBelongingToASpecificAtomicNumber[AN] = { j, -1 };
+            }
+            else if (found->second[1] == -1) {
+                found->second[1] = j;
             }
             else {
-                segmentIndicesBelongingToASpecificAtomicNumber[AN][1] = (unsigned short)j;
+                throw std::runtime_error("More than 2 segment types were found for the monoatomic cation with atomic number " + std::to_string(AN) + ".");
             }
 
         }
@@ -608,17 +769,30 @@ void rescaleSegments(parameters& param, calculation& _calculation) {
             int ind_left = it->second[0];
             int ind_right = it->second[1];
 
+            if (ind_right == -1) {
+                throw std::runtime_error("Only one segment type was found for the monoatomic cation with atomic number " + std::to_string(AN) +
+                    " (its screening charge density lies exactly on a charge raster point), rescaling its segments is not possible.");
+            }
+
             if (ind_right - ind_left > 1) {
-                throw std::runtime_error("More than 2 segmentTypes was found for monoatomic cation: " + std::to_string(AN) + ".");
+                throw std::runtime_error("More than 2 segment types were found for the monoatomic cation with atomic number " + std::to_string(AN) + ".");
             }
 
             int ind_molecule = -1;
 
-            for (int k = 0; _calculation.segments.SegmentTypeAreas[ind_left].size(); k++) {
+            for (int k = 0; k < int(_calculation.segments.SegmentTypeAreas[ind_left].size()); k++) {
                 if (_calculation.segments.SegmentTypeAreas[ind_left][k] > 0.0) {
                     ind_molecule = k;
                     break;
                 }
+            }
+
+            if (ind_molecule == -1) {
+                throw std::runtime_error("The molecule belonging to the monoatomic cation with atomic number " + std::to_string(AN) + " was not found.");
+            }
+
+            if (!(param.R_i[AN] > 0)) {
+                throw std::runtime_error("No radius was given for the monoatomic cation with atomic number " + std::to_string(AN) + " in parameters['radii'].");
             }
 
             int screeningCharge = int(_calculation.components[ind_molecule]->moleculeCharge * -1);
@@ -626,7 +800,7 @@ void rescaleSegments(parameters& param, calculation& _calculation) {
             double newArea = (4 * PI * param.R_i[AN] * param.R_i[AN]);
             double newSigma = screeningCharge / newArea;
 
-            unsigned short ind_Sigma_left = int((newSigma - param.sigmaMin) / param.sigmaStep);
+            int ind_Sigma_left = getLeftChargeRasterIndex(param, newSigma, "rescaled screening charge density (sigma)", _calculation.components[ind_molecule]->name);
 
             double sigmaLeft = param.ChargeRaster[ind_Sigma_left];
             double sigmaRight = param.ChargeRaster[ind_Sigma_left + 1];
@@ -649,7 +823,7 @@ void calculateSegmentConcentrations(calculation& _calculation) {
     for (int j = 0; j < _calculation.concentrations.size(); j++) {
 
         int firstNonZeroSegmentIndex = 0;
-        int lastNonZeroSegmentIndex = int(_calculation.concentrations.size()) - 1;
+        int lastNonZeroSegmentIndex = int(_calculation.segments.size()) - 1;
 
         std::vector<double> segmentConcentration(_calculation.segments.size(), 0.0);
 
@@ -691,24 +865,46 @@ void calculateSegmentConcentrations(calculation& _calculation) {
     }
 }
 
+// checks all concentrations (including the ones of the reference states) and temperatures of a calculation
+void checkConcentrationsAndTemperatures(const calculation& _calculation) {
+
+    const std::string prefix = "For calculation number " + std::to_string(_calculation.number) + " the mixture number ";
+
+    for (int j = 0; j < _calculation.concentrations.size(); j++) {
+
+        const double temperature = _calculation.temperatures[j];
+        if (!std::isfinite(temperature) || temperature <= 0) {
+            throw std::runtime_error(prefix + std::to_string(j) + " has the invalid temperature " + std::to_string(temperature) + " K.");
+        }
+
+        double sumOfConcentrations = 0;
+        double mix_chrg = 0;
+        for (int k = 0; k < _calculation.components.size(); k++) {
+            const double x = _calculation.concentrations[j][k];
+            if (!std::isfinite(x) || x < 0) {
+                throw std::runtime_error(prefix + std::to_string(j) + " has the invalid mole fraction " + std::to_string(x) + " for component " + std::to_string(k) + ".");
+            }
+            sumOfConcentrations += x;
+            mix_chrg = mix_chrg + _calculation.components[k]->moleculeCharge * x;
+        }
+
+        if (std::abs(1.0 - sumOfConcentrations) > MAX_CONCENTRATION_DIFF_FROM_ZERO) {
+            throw std::runtime_error(prefix + std::to_string(j) + ": the mole fractions do not add up to unity. residual concentration: " + std::to_string(std::abs(1.0 - sumOfConcentrations)));
+        }
+
+        if (std::abs(mix_chrg) > MAX_CONCENTRATION_DIFF_FROM_ZERO) {
+            throw std::runtime_error(prefix + std::to_string(j) + " is not electroneutral. residual charge: " + std::to_string(std::abs(mix_chrg)));
+        }
+    }
+}
+
 void finishCalculationInitiation(calculation& _calculation) {
 
     if (_calculation.concentrations.size() > 65535) {
         throw std::runtime_error("Too many calculations, other datatype would be necessary for newCalculation.referenceStates to cope with this amount. (unsigned short used so far allowing for up to 65535)");
     }
 
-    // check charge of all concentrations
-    for (int j = 0; j < _calculation.concentrations.size(); j++) {
-
-        double mix_chrg = 0;
-        for (int k = 0; k < _calculation.components.size(); k++) {
-            mix_chrg = mix_chrg + _calculation.components[k]->moleculeCharge * _calculation.concentrations[j][k];
-        }
-
-        if (abs(mix_chrg) > MAX_CONCENTRATION_DIFF_FROM_ZERO) {
-            throw std::runtime_error("For calculation number " + std::to_string(_calculation.number) + " the mixture number " + std::to_string(j) + " is not electroneutral. residual charge: " + std::to_string(abs(mix_chrg)));
-        }
-    }
+    checkConcentrationsAndTemperatures(_calculation);
 
     // save sorting of concentrations according to conditions, this clusters the calculation of the interaction matrix
     // sorting by similar concentration does not make sense as the gammas from the previous iteration
@@ -828,38 +1024,59 @@ void calculateLnGammaCombinatorial(parameters& param, calculation& _calculation)
             }
         }
     }
-    else if (param.sw_combTerm == 4) { // not tested yet
-        /*  mod. Staverman-Guggenheim by Grensemann published in Grensemann & Gmehling (2005) especially developed for COSMO-RS */
+    else if (param.sw_combTerm == 4) {
+        /*  mod. Staverman-Guggenheim by Grensemann & Gmehling, Ind. Eng. Chem. Res. 44 (2005) 1610, Eqs. (7) to (15),
+            especially developed for COSMO-RS.
+            Deviation from the paper: r_i# and q_i# (Eqs. 12 and 15) are calculated as the mole fraction averaged volume
+            and area of all other molecules, sum_{j!=i} x_j r_j / (1 - x_i). This is identical to the paper for binary
+            mixtures, but stays finite for mole fractions of zero and is an average for more than two components.
+            For x_i = 1 the values do not matter (V_i = F_i = 1), r_i and q_i are used. */
+        const int numberOfComponents = int(_calculation.components.size());
+
         for (int i = 0; i < _calculation.concentrations.size(); i++) {
 
-            double sum_qi_div_xi = 0;
-            double sum_ri_div_xi = 0;
-            double sum_qi_times_xi = 0;
-            double sum_ri_times_xi = 0;
+            const std::vector<double>& x = _calculation.concentrations[i];
 
-            for (int j = 0; j < _calculation.components.size(); j++) {
-                sum_qi_div_xi = sum_qi_div_xi + (_calculation.components[j]->Area / _calculation.concentrations[i][j]);
-                sum_ri_div_xi = sum_ri_div_xi + (_calculation.components[j]->Volume / _calculation.concentrations[i][j]);
-                sum_qi_times_xi = sum_qi_times_xi + (_calculation.components[j]->Area * _calculation.concentrations[i][j]);
-                sum_ri_times_xi = sum_ri_times_xi + (_calculation.components[j]->Volume * _calculation.concentrations[i][j]);
+            double sum_q_times_x = 0;
+            double sum_r_times_x = 0;
+
+            for (int j = 0; j < numberOfComponents; j++) {
+                sum_q_times_x += _calculation.components[j]->Area * x[j];
+                sum_r_times_x += _calculation.components[j]->Volume * x[j];
             }
 
-            std::vector<double> lnGamaForThisCalculation;
-            for (int j = 0; j < _calculation.components.size(); j++) {
+            for (int j = 0; j < numberOfComponents; j++) {
 
-                double qi_hash = (1 - _calculation.concentrations[i][j]) * sum_qi_div_xi;
-                double ri_hash = (1 - _calculation.concentrations[i][j]) * sum_ri_div_xi;
+                const double q_j = _calculation.components[j]->Area;
+                const double r_j = _calculation.components[j]->Volume;
 
-                double qi_min = std::min(_calculation.components[j]->Area, qi_hash);
-                double qi_max = std::max(_calculation.components[j]->Area, qi_hash);
+                // mole fraction averaged area and volume of the other molecules
+                double q_hash = q_j;
+                double r_hash = r_j;
+                const double sumOfOtherMoleFractions = 1.0 - x[j];
+                if (sumOfOtherMoleFractions > 0) {
+                    double sum_q_others = 0;
+                    double sum_r_others = 0;
+                    for (int k = 0; k < numberOfComponents; k++) {
+                        if (k == j) continue;
+                        sum_q_others += _calculation.components[k]->Area * x[k];
+                        sum_r_others += _calculation.components[k]->Volume * x[k];
+                    }
+                    q_hash = sum_q_others / sumOfOtherMoleFractions;
+                    r_hash = sum_r_others / sumOfOtherMoleFractions;
+                }
 
-                double ri_min = std::min(_calculation.components[j]->Volume, ri_hash);
-                double ri_max = std::max(_calculation.components[j]->Volume, ri_hash);
+                const double q_min = std::min(q_j, q_hash);
+                const double q_max = std::max(q_j, q_hash);
 
-                double Fi = pow(_calculation.components[j]->Area / sum_qi_times_xi, param.comb_SGG_lambda * (1 - (qi_min / qi_max)));
-                double Vi = pow(_calculation.components[j]->Volume / sum_ri_times_xi, param.comb_SGG_beta * (1 - (ri_min / ri_max)));
+                const double r_min = std::min(r_j, r_hash);
+                const double r_max = std::max(r_j, r_hash);
 
-                lnGamaForCalculations(i, j) = 1 - Vi - log(Vi) + 1 - (Vi / Fi) - log(Vi / Fi);
+                const double F = pow(q_j / sum_q_times_x, param.comb_SGG_lambda * (1 - (q_min / q_max)));
+                const double V = pow(r_j / sum_r_times_x, param.comb_SGG_beta * (1 - (r_min / r_max)));
+
+                // Eq. (7)
+                lnGamaForCalculations(i, j) = 1 - V + log(V) + 1 - (V / F) + log(V / F);
             }
         }
     }
@@ -896,7 +1113,8 @@ void calculateLnGammaCombinatorial(parameters& param, calculation& _calculation)
 #endif
 
             // only subtract reference state value if reference state type is not COSMO
-            if (_calculation.referenceStateType[h] != 3 && _calculation.referenceStateType[h] != 4) {
+            // and a reference state exists (not the case for ions with reference state PureComponentsOnlyNeutral)
+            if (_calculation.referenceStateType[h] != 3 && _calculation.referenceStateType[h] != 4 && _calculation.referenceStateCalculationIndices[h][j] != -1) {
                 int indexOfReferenceStateCalculation = _calculation.actualConcentrationIndices[_calculation.referenceStateCalculationIndices[h][j]];
 
                 _calculation.lnGammaCombinatorial(h, j) -= lnGamaForCalculations(indexOfReferenceStateCalculation, j);
@@ -916,10 +1134,19 @@ void calculateLnGammaResidual(parameters& param, calculation& _calculation) {
 
     Eigen::MatrixXd temporary_lnGammaMolecule = Eigen::MatrixXd::Zero(_calculation.concentrations.size(), _calculation.components.size());
 
+    // temporary arrays are indexed by the internal (sorted) concentration index i,
+    // the output arrays by the original concentration index h
+    Eigen::Tensor<double, 3, Eigen::RowMajor> temporary_contactStatistics;
     Eigen::Tensor<double, 4, Eigen::RowMajor> temporary_averageInteractionEnergies;
     Eigen::Tensor<double, 3, Eigen::RowMajor> temporary_partialMolarEnergies;
 
     if (param.sw_calculateContactStatisticsAndAdditionalProperties > 0) {
+
+        temporary_contactStatistics = Eigen::Tensor<double, 3, Eigen::RowMajor>(int(_calculation.concentrations.size()),
+            int(_calculation.components.size()),
+            int(_calculation.components.size()));
+
+        temporary_contactStatistics.setZero();
 
         temporary_averageInteractionEnergies = Eigen::Tensor<double, 4, Eigen::RowMajor>(int(_calculation.concentrations.size()),
             param.numberOfPartialInteractionMatrices + 1, // +1 because A_int is the first one
@@ -981,6 +1208,9 @@ void calculateLnGammaResidual(parameters& param, calculation& _calculation) {
             }
         }
 
+        // reset, as not all entries are rewritten (e.g. ion segments) and the segment reference state
+        // would otherwise be applied again on the values of the previous temperature
+        A_int.setZero();
         calculateInteractionMatrix(_calculation.segments, A_int, partialInteractionMatrices, param, temperature);
 
         // if the full interaction matrix is needed, fill upper right half
@@ -1080,9 +1310,12 @@ void calculateLnGammaResidual(parameters& param, calculation& _calculation) {
 
                 if (numberOfIteration > maximumNumberOfIterations) {
 
+                    // no output here: this runs in OpenMP threads (in Python without the GIL),
+                    // all information is passed on in the exception message instead
+                    std::string information = "";
+
                     if (param.sw_skip_COSMOSPACE_errors == 0) {
 
-                        std::string information = "";
                         information += "\nSYSTEM_COMPONENTS:\n";
                         for (int j = 0; j < _calculation.components.size(); j++) {
                             information += " -" + _calculation.components[j]->name + "\n";
@@ -1115,14 +1348,13 @@ void calculateLnGammaResidual(parameters& param, calculation& _calculation) {
                                 break;
                             }
                         }
-                        display(information + "\nCOSMOSPACE did not converge for calculation " + std::to_string(_calculation.number) + " on concentration " + std::to_string(i) + ": maximum number of iterations reached. (" + std::to_string(numberOfConvergedGammas) + "/" + std::to_string(numberOfSegments) + ")");
                     }
                     else {
                         // set all segment gammas to 1 as initial point for next execution
                         _calculation.segmentGammas = MatrixCalcType::Constant(RoundUpToNextMultipleOfEight(int(_calculation.segments.size())), int(_calculation.concentrations.size()), 1.0f);
                     }
 
-                    throw std::runtime_error("COSMOSPACE did not converge for calculation " + std::to_string(_calculation.number) + " on concentration " + std::to_string(i) + ": maximum number of iterations reached. (" + std::to_string(numberOfConvergedGammas) + "/" + std::to_string(numberOfSegments) + ")");
+                    throw std::runtime_error("COSMOSPACE did not converge for calculation " + std::to_string(_calculation.number) + " on concentration " + std::to_string(i) + ": maximum number of iterations reached. (" + std::to_string(numberOfConvergedGammas) + "/" + std::to_string(numberOfSegments) + ")" + information);
                 }
 
                 numberOfConvergedGammas = 0;
@@ -1156,14 +1388,15 @@ void calculateLnGammaResidual(parameters& param, calculation& _calculation) {
                     newGamma = 1 / newGamma;
                     double oldGamma = double(gammas[j]);
 
+                    // check convergence criteria on the undamped update, otherwise
+                    // damping would loosen the criterion by the factor 1 / (1 - dampingFactor)
+                    if (std::abs(log(newGamma) - log(oldGamma)) <= convergenceThreshhold) {
+                        numberOfConvergedGammas++;
+                    }
+
                     // apply damping
                     if (numberOfIteration > 200) {
                         newGamma = dampingFactor * newGamma + dampingFactorComplement * oldGamma;
-                    }
-
-                    // check convergence criteria
-                    if (abs(log(newGamma) - log(oldGamma)) <= convergenceThreshhold) {
-                        numberOfConvergedGammas++;
                     }
 
                     gammas[j] = calcType(newGamma);
@@ -1182,7 +1415,7 @@ void calculateLnGammaResidual(parameters& param, calculation& _calculation) {
 
 
             if (param.sw_calculateContactStatisticsAndAdditionalProperties > 0) {
-                calculateContactStatistics(_calculation, A_int, partialInteractionMatrices, Tau, gammas, int(i), temporary_averageInteractionEnergies, temporary_partialMolarEnergies, param);
+                calculateContactStatistics(_calculation, A_int, partialInteractionMatrices, Tau, gammas, int(i), temporary_contactStatistics, temporary_averageInteractionEnergies, temporary_partialMolarEnergies, param);
             }
 
 #ifdef MEASURE_TIME
@@ -1236,6 +1469,9 @@ void calculateLnGammaResidual(parameters& param, calculation& _calculation) {
 
             if (param.sw_calculateContactStatisticsAndAdditionalProperties > 0) {
                 for (int k = 0; k < _calculation.components.size(); k++) {
+                    // contact statistics do not depend on the reference state, hence they are copied as is
+                    _calculation.contactStatistics(h, j, k) = temporary_contactStatistics(i, j, k);
+
                     _calculation.averageSurfaceEnergies(h, 0, j, k) = multiplier * temporary_averageInteractionEnergies(i, 0, j, k);
 
                     for (int l = 0; l < param.numberOfPartialInteractionMatrices; l++) {
@@ -1247,13 +1483,14 @@ void calculateLnGammaResidual(parameters& param, calculation& _calculation) {
                     _calculation.partialMolarEnergies(h, 0, j) = multiplier * temporary_partialMolarEnergies(i, 0, j);
 
                     for (int l = 0; l < param.numberOfPartialInteractionMatrices; l++) {
-                        _calculation.partialMolarEnergies(h, l + 1, j) = multiplier * temporary_partialMolarEnergies(h, l + 1, j);
+                        _calculation.partialMolarEnergies(h, l + 1, j) = multiplier * temporary_partialMolarEnergies(i, l + 1, j);
                     }
                 }
             }
 
             // only subtract reference state value if reference state type is not COSMO
-            if (_calculation.referenceStateType[h] != 3 && _calculation.referenceStateType[h] != 4) {
+            // and a reference state exists (not the case for ions with reference state PureComponentsOnlyNeutral)
+            if (_calculation.referenceStateType[h] != 3 && _calculation.referenceStateType[h] != 4 && _calculation.referenceStateCalculationIndices[h][j] != -1) {
                 int indexOfReferenceStateCalculation = _calculation.actualConcentrationIndices[_calculation.referenceStateCalculationIndices[h][j]];
 
                 _calculation.lnGammaResidual(h, j) -= temporary_lnGammaMolecule(indexOfReferenceStateCalculation, j);
@@ -1300,8 +1537,10 @@ void calculate(std::vector<int>& calculationIndices) {
 #ifdef MEASURE_TIME
             std::chrono::high_resolution_clock::time_point rescaleSegments_last = std::chrono::high_resolution_clock::now();
 #endif
-            if (param.sw_alwaysReloadSigmaProfiles == 1 && n_ex > 3) {
+            if (calculations[calculationIndex].sigmaProfilesOutdated) {
 
+                // the segment types changed, all size related properties have to be calculated again
+                calculations[calculationIndex].sizeRelatedPropertiesInitialized = false;
                 calculations[calculationIndex].segments.clear();
 
                 for (int j = 0; j < calculations[calculationIndex].components.size(); j++) {
@@ -1321,11 +1560,18 @@ void calculate(std::vector<int>& calculationIndices) {
                 calculations[calculationIndex].segments.sort();
                 calculations[calculationIndex].segmentGammas =MatrixCalcType::Constant(RoundUpToNextMultipleOfEight(int(calculations[calculationIndex].segments.size())), int(calculations[calculationIndex].concentrations.size()), 1.0f);
                 calculations[calculationIndex].segmentConcentrations =MatrixCalcType::Zero(RoundUpToNextMultipleOfEight(int(calculations[calculationIndex].segments.size())), int(calculations[calculationIndex].concentrations.size()));
+                calculations[calculationIndex].sigmaProfilesOutdated = false;
             }
 
 
-            if (param.sw_alwaysCalculateSizeRelatedParameters == 1 || (param.sw_alwaysCalculateSizeRelatedParameters == 0 && n_ex == 3) \
-                || (param.sw_alwaysReloadSigmaProfiles == 1 && n_ex > 3) || param.sw_reloadConcentrations == 1 || param.sw_reloadReferenceConcentrations == 1) {
+            // segment concentrations and the combinatorial contribution are calculated once per calculation
+            // (tracked per calculation, so that calculations not run before or that failed are initialized later)
+            // and again whenever concentrations, sigma profiles or size related parameters change
+            const bool calculateSizeRelatedProperties = param.sw_alwaysCalculateSizeRelatedParameters == 1
+                || !calculations[calculationIndex].sizeRelatedPropertiesInitialized
+                || param.sw_reloadConcentrations == 1 || param.sw_reloadReferenceConcentrations == 1;
+
+            if (calculateSizeRelatedProperties) {
 
                 rescaleSegments(param, calculations[calculationIndex]);
                 calculateSegmentConcentrations(calculations[calculationIndex]);
@@ -1342,8 +1588,9 @@ void calculate(std::vector<int>& calculationIndices) {
             std::chrono::high_resolution_clock::time_point calculateCombinatorial_last = std::chrono::high_resolution_clock::now();
 #endif
             // recalculate combinatorial term if needed
-            if ((param.sw_alwaysCalculateSizeRelatedParameters == 0 && n_ex == 3) || param.sw_alwaysCalculateSizeRelatedParameters == 1 || param.sw_reloadConcentrations == 1 || param.sw_reloadReferenceConcentrations == 1) {
-                calculateLnGammaCombinatorial(param, calculations[calculationIndex]);;
+            if (calculateSizeRelatedProperties) {
+                calculateLnGammaCombinatorial(param, calculations[calculationIndex]);
+                calculations[calculationIndex].sizeRelatedPropertiesInitialized = true;
             }
 
 #ifdef MEASURE_TIME
@@ -1374,29 +1621,50 @@ void calculate(std::vector<int>& calculationIndices) {
                 double reference_pressure = 101325; // Pa = 1 atm;
                 std::vector<int> atomicNumbersWithout_dGsolv_tau = std::vector<int>();
                 double approximate_dGsolv_tau = 0.0262; // median of other values
-                for (int i_concentration = 0; i_concentration < calculations[calculationIndex].originalNumberOfCalculations; i_concentration++) {
-                    if (calculations[calculationIndex].referenceStateType[i_concentration] == 4) {
+                calculation& thisCalculation = calculations[calculationIndex];
+                for (int i_concentration = 0; i_concentration < thisCalculation.originalNumberOfCalculations; i_concentration++) {
+                    if (thisCalculation.referenceStateType[i_concentration] == 4) {
+
+                        if (thisCalculation.dGsolv.data() == nullptr) {
+                            throw std::runtime_error("Calculation number " + std::to_string(thisCalculation.number) + " uses reference state type 4 (solvation energy), but no 'dGsolv' output array was given.");
+                        }
+
+                        // concentrations and temperatures are stored sorted internally
+                        const int i_internal = thisCalculation.actualConcentrationIndices[i_concentration];
+                        const std::vector<double>& thisConcentration = thisCalculation.concentrations[i_internal];
+
                         int i_solvent_component = -1;
-                        for (int i_component = 0; i_component < calculations[calculationIndex].components.size(); i_component++) {
-                            if (calculations[calculationIndex].concentrations[i_concentration][i_component] == 1.0f) {
+                        for (int i_component = 0; i_component < thisCalculation.components.size(); i_component++) {
+                            if (thisConcentration[i_component] == 1.0) {
                                 i_solvent_component = i_component;
                                 break;
                             }
                         }
-                        for (int i_component = 0; i_component < calculations[calculationIndex].components.size(); i_component++) {
+                        if (i_solvent_component == -1) {
+                            throw std::runtime_error("Calculation number " + std::to_string(thisCalculation.number) + ", concentration " + std::to_string(i_concentration) +
+                                ": reference state type 4 (solvation energy) requires one component with a mole fraction of 1 (the solvent) and all other components with a mole fraction of 0.");
+                        }
+                        for (int i_component = 0; i_component < thisCalculation.components.size(); i_component++) {
                             double dGsolv = 0.0;
-                            if (calculations[calculationIndex].concentrations[i_concentration][i_component] == 0.0f) {
+                            if (thisConcentration[i_component] == 0.0) {
 
-                                double RT = R_GAS_CONSTANT * calculations[calculationIndex].temperatures[i_concentration];
+                                const int i_molecule = thisCalculation.componentIndices[i_component];
+                                const molecule& solute = *thisCalculation.components[i_component];
+
+                                if (std::isnan(solute.epsilonInfinityTotalEnergy)) {
+                                    throw std::runtime_error("The COSMO file of molecule '" + solute.name + "' does not contain the total energy, which is needed to calculate solvation energies.");
+                                }
+
+                                double RT = R_GAS_CONSTANT * thisCalculation.temperatures[i_internal];
                                 double molar_volume_ideal_gas = RT / reference_pressure;
                                 double RT_kcalPerMol = RT / (1000 * 4.184);
 
                                 // all energies calculated below this line are in kcal/mol
                                 double E_vdw = 0.0;
-                                segmentTypeCollection segments = calculations[calculationIndex].components[i_component]->segments;
+                                const segmentTypeCollection& segments = solute.segments;
                                 std::unordered_map<int, double> areasByAtomicNumber;
-                                for (int i_segment = 0; i_segment < segments.size(); i_segment++) {
-                                    int AN = segments.SegmentTypeAtomicNumber[i_segment];
+                                for (int i_segment = 0; i_segment < int(segments.SegmentTypeAtomicNumber.size()); i_segment++) {
+                                    int AN = getElementForParameterLookup(segments.SegmentTypeAtomicNumber[i_segment]);
 
                                     if (areasByAtomicNumber.find(AN) == areasByAtomicNumber.end())
                                         areasByAtomicNumber[AN] = 0.0;
@@ -1405,7 +1673,7 @@ void calculate(std::vector<int>& calculationIndices) {
                                 }
 
                                 for (auto& it : areasByAtomicNumber) {
-                                    double this_atom_dGsolv_tau = abs(param.dGsolv_tau[it.first]);
+                                    double this_atom_dGsolv_tau = std::abs(param.dGsolv_tau[it.first]);
                                     if (this_atom_dGsolv_tau == 0.0) {
                                         this_atom_dGsolv_tau = approximate_dGsolv_tau;
                                         atomicNumbersWithout_dGsolv_tau.push_back(it.first);
@@ -1413,11 +1681,12 @@ void calculate(std::vector<int>& calculationIndices) {
                                     
                                     E_vdw += this_atom_dGsolv_tau * it.second;
                                 }
-                                double referenceStateCorrection = RT_kcalPerMol * log(molar_volume_ideal_gas / (calculations[calculationIndex].components[i_solvent_component]->molarVolumeAt25C / 1E6));
+                                double referenceStateCorrection = RT_kcalPerMol * log(molar_volume_ideal_gas / (thisCalculation.components[i_solvent_component]->molarVolumeAt25C / 1E6));
 
-                                double E_diel = (calculations[calculationIndex].components[i_component]->epsilonInfinityTotalEnergy - param.dGsolv_E_gas[i_component]) * kcalPerMol_per_Hartree;
-                                double mu_liquid = RT_kcalPerMol * calculations[calculationIndex].lnGammaTotal(i_concentration, i_component);
-                                double E_ring = param.dGsolv_omega_ring * param.dGsolv_numberOfAtomsInRing[i_component];
+                                // dGsolv_E_gas and dGsolv_numberOfAtomsInRing are given per loaded molecule
+                                double E_diel = (solute.epsilonInfinityTotalEnergy - param.dGsolv_E_gas[i_molecule]) * kcalPerMol_per_Hartree;
+                                double mu_liquid = RT_kcalPerMol * thisCalculation.lnGammaTotal(i_concentration, i_component);
+                                double E_ring = param.dGsolv_omega_ring * param.dGsolv_numberOfAtomsInRing[i_molecule];
                                 dGsolv = E_diel + mu_liquid - E_vdw - E_ring - referenceStateCorrection - param.dGsolv_eta;
 #ifdef PRINT_DEBUG_INFO
                                 display("dGsolv_1_" + std::to_string(calculationIndex) + ": " + std::to_string(dGsolv) + "\n");
@@ -1431,7 +1700,7 @@ void calculate(std::vector<int>& calculationIndices) {
 
                             }
 
-                            calculations[calculationIndex].dGsolv(i_concentration, i_component) = dGsolv;
+                            thisCalculation.dGsolv(i_concentration, i_component) = dGsolv;
                         }
                     }
                 }
@@ -1446,12 +1715,13 @@ void calculate(std::vector<int>& calculationIndices) {
                         throw std::runtime_error("For the following atomic numbers not all parameters are available for the calculation of solvation energies: " + ANs);
                     }
                     else {
-                        warnings.push_back(" - For the following atomic numbers not all parameters are available for the calculation of solvation energies, an estimate was used: " + ANs);
+                        addWarning(" - For the following atomic numbers not all parameters are available for the calculation of solvation energies, an estimate was used: " + ANs);
                     }
 
                 }
             }
         });
     }
+    sigmaProfilesUsedInCalculation = true;
     e.rethrow();
 }

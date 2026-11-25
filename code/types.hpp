@@ -14,6 +14,12 @@
 #include <memory>
 #include <algorithm>
 #include <mutex>
+#include <atomic>
+#include <exception>
+#include <array>
+#include <cmath>
+#include <stdexcept>
+#include <string>
 
 
 // Constants
@@ -21,6 +27,32 @@
 #define R_GAS_CONSTANT 8.31446261815324
 #define N_AVOGADRO 6.022140857e+23
 #define MAX_CONCENTRATION_DIFF_FROM_ZERO 0.000001
+
+// size of all per-element vectors: atomic numbers up to 118 plus differentiated hydrogens (100 + atomic number of the bonded atom)
+constexpr int NUMBER_OF_ELEMENT_SLOTS = 300;
+
+// returns the atomic number used to look up element specific parameters,
+// differentiated hydrogens (100 + atomic number of the bonded atom) are mapped back to hydrogen
+inline int getElementForParameterLookup(int atomicNumber) {
+	return atomicNumber > 100 ? 1 : atomicNumber;
+}
+
+// parses an atomic number given as key of a parameter dictionary (e.g. radii or dGsolv_tau)
+inline int parseAtomicNumberKey(const std::string& key, const std::string& parameterName) {
+	int atomicNumber = -1;
+	try {
+		size_t parsedCharacters = 0;
+		atomicNumber = std::stoi(key, &parsedCharacters);
+		if (parsedCharacters != key.size()) atomicNumber = -1;
+	}
+	catch (...) {
+		atomicNumber = -1;
+	}
+	if (atomicNumber < 1 || atomicNumber > 118) {
+		throw std::runtime_error("The key '" + key + "' of parameter '" + parameterName + "' is not a valid atomic number (1 to 118).");
+	}
+	return atomicNumber;
+}
 
 constexpr std::array<double, 103> ioniz_potential_ev = { {
 		/*  0 */ NAN,
@@ -129,6 +161,25 @@ constexpr std::array<double, 103> ioniz_potential_ev = { {
 	}
 };
 
+// Returns the first ionization potential in eV for the given segment atomic number.
+// With differentiated hydrogens (sw_differentiateHydrogens == 1) hydrogens are stored as
+// 100 + atomic number of the bonded atom; these are mapped back to hydrogen.
+inline double getIonizationPotentialEv(int atomicNumber, bool hydrogensAreDifferentiated) {
+
+	int element = atomicNumber;
+	if (hydrogensAreDifferentiated && atomicNumber > 100) {
+		element = 1;
+	}
+
+	if (element < 1 || element >= int(ioniz_potential_ev.size())) {
+		throw std::runtime_error("No ionization potential available for atomic number " + std::to_string(atomicNumber) +
+			" (valid range: 1 to " + std::to_string(ioniz_potential_ev.size() - 1) + ")." +
+			(element == 0 ? " An atomic number of 0 occurs if sw_SR_atomicNumber is 0, which cannot be combined with sw_SR_polarizabilities 7 or 8." : ""));
+	}
+
+	return ioniz_potential_ev[element];
+}
+
 /* Structures and classes */
 
 template <typename T>
@@ -158,8 +209,8 @@ struct parameters {
                                            "1" to account for sigma correlation in misfit contribution 
 										   "2" to account for sigma correlation in misfit contribution except for ions */
 
-	int sw_useSegmentReferenceStateForInteractionMatrix = 0;		/* switch: "0" Set segment reference state to pure segment (COSMO-RS default) (segment reference state cancels if molecular refstate calculated)
-																	   "1" Set segment reference state to conductor (segment reference state cancels if molecular refstate calculated) */
+	int sw_useSegmentReferenceStateForInteractionMatrix = 0;		/* switch: "0" Set segment reference state to conductor (COSMO-RS default) (segment reference state cancels if molecular refstate calculated)
+																	   "1" Set segment reference state to pure segment (segment reference state cancels if molecular refstate calculated) */
 
    	int sw_combTerm = 1;            /* switch:  "0" No combinatorial term
 											"1" to use the combinatorial term by Staverman-Guggenheim
@@ -177,7 +228,12 @@ struct parameters {
 	int sw_calculateContactStatisticsAndAdditionalProperties = 0;		/* switch:  "0" Do not calculate contact statistics
 																				"1" Calculate contact statistics 
 																				"2" Calculate contact statistics, partial molar properties and average surface energies*/
-	int numberOfPartialInteractionMatrices;
+	int numberOfPartialInteractionMatrices = 0;
+	// position of the respective matrix in sw_SR_partialInteractionMatrices, -1 if not requested
+	int partialInteractionMatrixIndex_E_mf = -1;
+	int partialInteractionMatrixIndex_G_hb = -1;
+	int partialInteractionMatrixIndex_E_hb = -1;
+	int partialInteractionMatrixIndex_E_vdW = -1;
 
 	int sw_alwaysReloadSigmaProfiles = 0;
 
@@ -219,13 +275,13 @@ struct parameters {
 	/* Parameters used for solvation energy calculation */
 	double dGsolv_eta;
 	double dGsolv_omega_ring;
-	std::vector<double> dGsolv_tau = std::vector<double>(118, 0.0);
+	std::vector<double> dGsolv_tau = std::vector<double>(NUMBER_OF_ELEMENT_SLOTS, 0.0);
 	std::vector<double> dGsolv_E_gas;
 	std::vector<int> dGsolv_numberOfAtomsInRing;
 
     /* Radii used for cosmo segment scaling for monoatomic ions */
-	std::vector<double> R_i = std::vector<double>(118, 0.0);                       /* new radii, element specific (r_i[AN]) from the input file*/
-	std::vector<double> R_i_COSMO = std::vector<double>(118, 0.0);                 /* old radii from COSMO-file, element specific (r_i[AN]); */
+	std::vector<double> R_i = std::vector<double>(NUMBER_OF_ELEMENT_SLOTS, 0.0);                       /* new radii, element specific (r_i[AN]) from the input file*/
+	std::vector<double> R_i_COSMO = std::vector<double>(NUMBER_OF_ELEMENT_SLOTS, 0.0);                 /* old radii from COSMO-file, element specific (r_i[AN]); */
 
     /* Experimental parameters */
     /* These are used to test new modifications to COSMO-RS. Parameters of succesfull modifications should
@@ -424,10 +480,10 @@ struct molecule {
 	std::string name;
 	std::string qmMethod;
 
-	double Area;
-	double Volume;
-	double epsilonInfinityTotalEnergy;
-	double molarVolumeAt25C;
+	double Area = NAN;
+	double Volume = NAN;
+	double epsilonInfinityTotalEnergy = NAN; // stays NaN if the COSMO file does not contain it
+	double molarVolumeAt25C = NAN; // only calculated if solvation energies are calculated
 
 	signed char moleculeCharge;
 	unsigned short moleculeGroup;
@@ -459,13 +515,15 @@ struct molecule {
 	Eigen::VectorXd segmentSigmas;
 
 	void clear_unneeded_matrices(bool keepDataNeededForReloadingSigmaProfile = false) {
-		atomPositions.resize(0, 0);
 		atomRadii.resize(0);
 		// atomAtomicNumbers.resize(0); this is currently needed for monoatomic ions
 
-		segmentAtomIndices.resize(0);
-
 		if (keepDataNeededForReloadingSigmaProfile == false) {
+			// atom positions, segment atom indices and polarizability tensors are needed to
+			// project the polarizabilities again when reloading the sigma profiles
+			atomPositions.resize(0, 0);
+			segmentAtomIndices.resize(0);
+			atomPolarizabilityTensors.resize(0, 0);
 			segmentAtomicNumber.resize(0);
 			segmentAtomicPolariz.resize(0);
 			segmentPositions.resize(0, 0);
@@ -497,6 +555,7 @@ struct calculation {
 	}
 
 	std::vector<std::shared_ptr<molecule>> components;
+	std::vector<int> componentIndices; // index of each component in the list of loaded molecules
 
 
 	std::vector<std::vector<double>> concentrations;
@@ -528,8 +587,12 @@ struct calculation {
 	Eigen::Tensor<double, 4, Eigen::RowMajor> averageSurfaceEnergies_data;
 	Eigen::Tensor<double, 3, Eigen::RowMajor> partialMolarEnergies_data;
 
+	// state of the calculation
+	bool sizeRelatedPropertiesInitialized = false; // segment concentrations and combinatorial contribution calculated
+	bool sigmaProfilesOutdated = false;            // the sigma profiles of the molecules were reloaded, segments have to be rebuilt
+
 	//holds first and last segment index that are needed for calculations with the COSMOSPACE equation allowing to save calculations
-	std::vector<int> lowerBoundIndexForCOSMOSPACECalculation; 
+	std::vector<int> lowerBoundIndexForCOSMOSPACECalculation;
 	std::vector<int> upperBoundIndexForCOSMOSPACECalculation;
 
 	std::vector<double> temperatures;
@@ -563,11 +626,13 @@ struct calculation {
 		return index;
 	}
 
-	int addOrFindArrayIndexForConcentration(std::vector<double> concentration, double temperature)
+	// only rows with index >= startIndex are searched, this way reference state rows
+	// are not shared with the rows given by the user, which could be reloaded later
+	int addOrFindArrayIndexForConcentration(std::vector<double> concentration, double temperature, int startIndex = 0)
 	{
 		int index = -1;
 		int nConditions = 1; // only temperature
-		for (int i = 0; i < concentrations.size(); i++) {
+		for (int i = startIndex; i < concentrations.size(); i++) {
 			int nEqual = 0;
 			for (int j = 0; j < concentration.size(); j++) {
 				if (concentrations[i][j] == concentration[j]) {
@@ -631,21 +696,25 @@ struct calculation {
 class threadException {
 	std::exception_ptr Ptr;
 	std::mutex         Lock;
+	std::atomic<bool>  hasException{ false };
 public:
 	threadException() : Ptr(nullptr) {}
 
+	// called after the parallel section, no other thread accesses Ptr anymore
 	void rethrow() {
 		if (this->Ptr) std::rethrow_exception(this->Ptr);
 	}
+	// keeps the first exception
 	void capture_exception() {
 		std::unique_lock<std::mutex> guard(this->Lock);
-		this->Ptr = std::current_exception();
+		if (!this->Ptr) this->Ptr = std::current_exception();
+		hasException = true;
 	}
 
 	template <typename Function, typename... Parameters>
 	void run(Function f, Parameters... params)
 	{
-		if (!this->Ptr) {
+		if (!hasException) {
 			try
 			{
 				f(params...);

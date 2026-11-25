@@ -31,8 +31,13 @@ options = {
                                                                     #       0 : do not calculate anything additionaly
                                                                     #       1 : calculate contact statistics and average surface energies
                                                                     #       2 : calculate contact statistics, average surface energies and partial molar properties
-    'sw_SR_partialInteractionMatrices' : [],                        # partial interaction matrices to be calculated as partial mlar properties
-                                                                    # examples are ['E_mf', 'G_hb'], these must however also be added on the C++ side
+    'sw_SR_partialInteractionMatrices' : [],                        # contributions to A_int reported separately in average_surface_energies and partial_molar_energies
+                                                                    # (index 0 is A_int, index k + 1 the k-th entry of this list), any of:
+                                                                    #       'E_mf'  : misfit energy incl. the fluorine correction E_F_corr
+                                                                    #       'G_hb'  : hydrogen bonding free energy
+                                                                    #       'E_hb'  : hydrogen bonding enthalpy
+                                                                    #       'E_vdW' : dispersion energy from the polarizabilities
+                                                                    # A_int = E_mf + G_hb + E_vdW, e.g. ['E_mf', 'G_hb', 'E_vdW']
     
                                                                   
     # segment descriptor switches

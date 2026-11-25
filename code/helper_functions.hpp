@@ -6,11 +6,14 @@
 
 #pragma once
 #include "general.hpp"
+#include <cctype>
+#include <functional>
+#include <sstream>
 #include <fstream>
 #include <iomanip>
 
-std::function<void(std::string)> display;
-std::function<void(std::string, unsigned long)> displayTime;
+inline std::function<void(std::string)> display;
+inline std::function<void(std::string, unsigned long)> displayTime;
 
 static inline std::string leftTrim(std::string val) {
 	val.erase(val.begin(), std::find_if(val.begin(), val.end(), [](unsigned char c) {

@@ -2,8 +2,14 @@
 
 This repository contains a C++ implementation of the COSMO-RS model with a
 pybind11 Python interface. It is much faster than the
-[pure Python implementation](https://github.com/TUHH-TVT/openCOSMO-RS_py), and
-newer model features and parameterizations are added here first.
+[pure Python implementation](https://github.com/TUHH-TVT/openCOSMO-RS_py).
+New model features and parameterizations are usually added here first; the
+Python implementation contains the same features (atomic polarizabilities for
+the dispersion energy, solvation free energies, the combinatorial terms,
+partial interaction matrices) and can be used to cross-check results. The
+activity coefficients of both implementations agree to about 1e-5 (the
+COSMOSPACE iteration of this implementation stops when ln(Gamma) changes by
+less than 1e-5).
 
 The standalone binary is useful for simple JSON-driven batch calculations and
 is currently being used by ORCA. MATLAB users should call the Python
@@ -113,6 +119,19 @@ cmake -S . -B build -DOPENCOMSORS_SIMD=AUTO
 cmake --build build --config Release
 ```
 
+**MinGW-w64 (GCC on Windows)**
+
+With GCC 13 from MinGW-w64, builds with `-DUSE_DOUBLE` and the AVX or FMA
+backend can crash randomly (access violation) when calculating. The compiler
+passes a 16 byte aligned buffer to an Eigen function that returns a 256 bit
+vector and stores into it with an aligned instruction. The flags
+`-mstackrealign` and `-DEIGEN_UNALIGNED_VECTORIZE=0` do not help. Use one of
+the following instead:
+
+- build with clang (e.g. llvm-mingw): `-DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++`
+- build with MSVC (Visual Studio)
+- use the scalar backend: `-DOPENCOMSORS_SIMD=SCALAR`
+
 **Linux**
 
 Install a compiler, CMake, Python development headers, and NumPy. If the target
@@ -179,8 +198,11 @@ allocates result arrays internally and currently writes a compact output JSON:
 
 If solvation-energy parameters such as `dGsolv_E_gas`, `dGsolv_tau`,
 `dGsolv_eta`, and `dGsolv_numberOfAtomsInRing` are not provided, `dGsolv`
-values remain zero. Use the Python API for activity-coefficient outputs and
-detailed tensor outputs.
+values remain zero. `dGsolv_E_gas` (gas phase energy in Hartree) and
+`dGsolv_numberOfAtomsInRing` need one entry per entry of `componentPaths`.
+Solvation energies are calculated for rows with reference-state type `4`,
+which need one component with a mole fraction of one (the solvent). Use the
+Python API for activity-coefficient outputs and detailed tensor outputs.
 
 ### Minimal CLI input JSON
 
@@ -237,9 +259,11 @@ CLI input notes:
   For reference-state types `0`, `1`, `3`, and `4`, use an empty row such as
   `[[]]` for one point. For type `2`, provide explicit compositions with shape
   `(n_points, n_components)`, for example `[[0.0, 1.0, 0.0]]`.
-- The CLI uses compiled C++ defaults for switches not explicitly handled in
-  `code/bindings_forCLI.cpp`. The Python API exposes more options and is the
-  recommended interface for advanced workflows.
+- The CLI accepts the same `sw_SR_*` option keys as the Python API (for example
+  `"sw_SR_polarizabilities": 7`) at the top level of the input JSON. Options
+  that are not given use the compiled C++ defaults.
+- Invalid input stops the program with a detailed error message and exit
+  code 1.
 
 ## Python API reference
 
@@ -307,7 +331,12 @@ Dimensions:
 - `n_points`: number of concentration/temperature rows.
 - `n_components`: number of selected components.
 - `n_interaction_matrices`: `1 + len(options["sw_SR_partialInteractionMatrices"])`.
-  The leading matrix is `A_int`.
+  The leading matrix is `A_int`, followed by the requested contributions in the
+  order given. Possible contributions are `E_mf` (misfit, including the
+  fluorine correction `E_F_corr` when polarizabilities are used), `G_hb`
+  (hydrogen bonding free energy), `E_hb` (hydrogen bonding enthalpy) and
+  `E_vdW` (dispersion from polarizabilities), with
+  `A_int = E_mf + G_hb + E_vdW`.
 
 Required input fields:
 
@@ -358,10 +387,19 @@ structures, so shapes must match exactly:
 | `ln_gamma_x_SR_combinatorial_calc` | always | `(n_points, n_components)` |
 | `ln_gamma_x_SR_residual_calc` | always | `(n_points, n_components)` |
 | `ln_gamma_x_SR_calc` | always | `(n_points, n_components)` |
-| `dGsolv` | optional solvation output | `(n_points, 1)` |
+| `dGsolv` | rows with reference-state type `4` (kcal/mol) | `(n_points, n_components)` |
 | `contact_statistics` | `sw_SR_calculateContactStatisticsAndAdditionalProperties > 0` | `(n_points, n_components, n_components)` |
 | `average_surface_energies` | `sw_SR_calculateContactStatisticsAndAdditionalProperties > 0` | `(n_points, n_interaction_matrices, n_components, n_components)` |
 | `partial_molar_energies` | `sw_SR_calculateContactStatisticsAndAdditionalProperties == 2` | `(n_points, n_interaction_matrices, n_components)` |
+
+Units: `partial_molar_energies` are in J/mol. `average_surface_energies` contain
+an additional factor of the Avogadro constant; divided by N_A they are in J/mol
+and `sum_i x_i sum_j average_surface_energies[i, j] / N_A` equals the mixture
+energy `sum_i x_i partial_molar_energies[i]`.
+
+All result arrays are checked when calling `loadCalculations()`: they have to be
+writeable `float64` NumPy arrays in C order with exactly the shapes above,
+otherwise a `RuntimeError` describing the problem is raised.
 
 The helper `fill_missing_calculation_structures()` in
 [`bindings/run_example.py`](bindings/run_example.py) shows the recommended
@@ -370,8 +408,8 @@ allocation pattern.
 ### Direct NumPy binding caveats
 
 `loadCalculations()` does not copy result arrays into independent C++ storage.
-pybind11 converts Python objects to `py::array_t<double>`, and the C++ code
-creates Eigen `Map`/`TensorMap` views over the arrays' memory.
+The C++ code creates Eigen `Map`/`TensorMap` views over the arrays' memory,
+which is why arrays that would need a conversion are rejected.
 
 Mapped arrays:
 

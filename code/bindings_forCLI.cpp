@@ -26,7 +26,7 @@ void initializeOnCLI() {
     initialize(param, true);
     param.sw_dGsolv_calculation_strict = 0;
     warnings = std::vector<std::string>();
-    n_ex = 3;
+    n_ex = 3; // only used to check the order of the calls
 }
 
 
@@ -40,6 +40,11 @@ void loadParametersOnCLI(const json& parameters) {
     param.SigmaHB = parameters["SigmaHB"].template get<double>();
 
     param.Rav = parameters["Rav"].template get<double>();
+
+    if (param.sw_SR_polarizabilities > 0) {
+        param.E_F_corr = parameters["E_F_corr"].template get<double>();
+        param.m_vdW = parameters["m_vdW"].template get<double>();
+    }
 
     if (param.sw_misfit > 0) {
         param.fCorr = parameters["fCorr"].template get<double>();
@@ -73,25 +78,24 @@ void loadParametersOnCLI(const json& parameters) {
         param.dGsolv_eta = parameters["dGsolv_eta"].template get<double>();
         param.dGsolv_omega_ring = parameters["dGsolv_omega_ring"].template get<double>();
 
-        json radii = parameters["dGsolv_tau"];
+        json dGsolv_tau = parameters["dGsolv_tau"];
 
-        for (json::iterator it = radii.begin(); it != radii.end(); ++it)
-            param.dGsolv_tau[std::stoi(it.key())] = it.value().template get<double>();
+        for (json::iterator it = dGsolv_tau.begin(); it != dGsolv_tau.end(); ++it)
+            param.dGsolv_tau[parseAtomicNumberKey(it.key(), "dGsolv_tau")] = it.value().template get<double>();
 
-        json dGsolv_numberOfAtomsInRing = parameters["dGsolv_numberOfAtomsInRing"];
-        for (int it : dGsolv_numberOfAtomsInRing)
-            param.dGsolv_numberOfAtomsInRing.push_back(it);
-
-        json dGsolv_E_gas = parameters["dGsolv_E_gas"];
-        for (double it : dGsolv_E_gas)
-            param.dGsolv_E_gas.push_back(it);
+        // one entry per loaded molecule (order of the component paths)
+        if (!parameters.contains("dGsolv_E_gas") || !parameters.contains("dGsolv_numberOfAtomsInRing")) {
+            throw std::runtime_error("To calculate solvation energies the parameters 'dGsolv_E_gas' and 'dGsolv_numberOfAtomsInRing' (one entry per loaded molecule) are needed in addition to 'dGsolv_eta'.");
+        }
+        param.dGsolv_numberOfAtomsInRing = parameters["dGsolv_numberOfAtomsInRing"].template get<std::vector<int>>();
+        param.dGsolv_E_gas = parameters["dGsolv_E_gas"].template get<std::vector<double>>();
     }
 
     if (parameters.contains("radii")) {
         json radii = parameters["radii"];
 
         for (json::iterator it = radii.begin(); it != radii.end(); ++it)
-            param.R_i[std::stoi(it.key())] = it.value().template get<double>();
+            param.R_i[parseAtomicNumberKey(it.key(), "radii")] = it.value().template get<double>();
     }
     // experimental parameters for prototyping
     if (parameters.contains("exp")) {
@@ -104,21 +108,41 @@ void loadParametersOnCLI(const json& parameters) {
 
 void loadMoleculesOnCLI(const json& options, const json& parameters, const json& componentPaths) {
 
-    // options
+    // options, same keys as for the python module, the compiled defaults are used for options not given
+    auto readOption = [&](const char* key, int& target) {
+        if (options.contains(key)) target = options[key].template get<int>();
+    };
+    readOption("sw_SR_combTerm", param.sw_combTerm);
+    readOption("sw_SR_alwaysCalculateSizeRelatedParameters", param.sw_alwaysCalculateSizeRelatedParameters);
+    readOption("sw_SR_alwaysReloadSigmaProfiles", param.sw_alwaysReloadSigmaProfiles);
+    readOption("sw_SR_useSegmentReferenceStateForInteractionMatrix", param.sw_useSegmentReferenceStateForInteractionMatrix);
+    readOption("sw_SR_calculateContactStatisticsAndAdditionalProperties", param.sw_calculateContactStatisticsAndAdditionalProperties);
+    readOption("sw_SR_differentiateHydrogens", param.sw_differentiateHydrogens);
+    readOption("sw_SR_differentiateMoleculeGroups", param.sw_differentiateMoleculeGroups);
+    readOption("sw_SR_polarizabilities", param.sw_SR_polarizabilities);
+    readOption("sw_SR_atomicNumber", param.sw_atomicNumber);
+    readOption("sw_SR_misfit", param.sw_misfit);
+    readOption("sw_skip_COSMOSPACE_errors", param.sw_skip_COSMOSPACE_errors);
+    if (options.contains("sw_SR_COSMOfiles_type")) {
+        param.sw_COSMOfiles_type = options["sw_SR_COSMOfiles_type"].template get<std::string>();
+    }
 
-    if (param.sw_calculateContactStatisticsAndAdditionalProperties != 0) {
-        const json& partialInteractionMatrices = options["sw_SR_partialInteractionMatrices"];
-        param.numberOfPartialInteractionMatrices = int(partialInteractionMatrices.size());
+    std::vector<std::string> partialInteractionMatrixNames;
+    if (param.sw_calculateContactStatisticsAndAdditionalProperties != 0 && options.contains("sw_SR_partialInteractionMatrices")) {
+        partialInteractionMatrixNames = options["sw_SR_partialInteractionMatrices"].template get<std::vector<std::string>>();
     }
-    else {
-        param.numberOfPartialInteractionMatrices = 0;
-    }
+    setPartialInteractionMatrices(param, partialInteractionMatrixNames);
     if (param.sw_misfit < 0 || param.sw_misfit > 2) {
         throw std::runtime_error("sw_SR_misfit should have one of the following values: [0, 1, 2].");
     }
 
+    if (param.sw_SR_polarizabilities > 0 && param.sw_atomicNumber == 0) {
+        throw std::runtime_error("sw_SR_polarizabilities > 0 requires sw_SR_atomicNumber = 1, as the fluorine correction and the ionization potentials depend on the atomic number.");
+    }
+
     // parameters
     loadParametersOnCLI(parameters);
+    validateSolvationEnergyParameters(param, int(componentPaths.size()));
 
     for (const auto& componentPath : componentPaths) {
         molecule newMolecule = loadNewMolecule(param, componentPath.template get<std::string>());
@@ -147,13 +171,35 @@ void loadCalculationsOnCLI(const json& calculationsOnCLI) {
         const json& calculationDict = calculationsOnCLI[i];
 
         // array of component indices
-        const json& componentList = calculationDict["component_indices"];
-        int numberOfComponents = int(componentList.size());
+        std::vector<int> componentIndices = calculationDict["component_indices"].template get<std::vector<int>>();
+        int numberOfComponents = int(componentIndices.size());
+
+        // concentrations and temperatures
+        auto temperatures = calculationDict["temperatures"].template get<std::vector<double>>();
+        auto concentrations = calculationDict["concentrations"].template get<std::vector<std::vector<double>>>();
+        auto referenceStateTypes = calculationDict["reference_state_types"].template get<std::vector<int>>();
+
+        std::vector<std::vector<double>> referenceStateConcentrations(concentrations.size());
+        if (calculationDict.contains("reference_state_concentrations")) {
+            referenceStateConcentrations = calculationDict["reference_state_concentrations"].template get<std::vector<std::vector<double>>>();
+        }
+
+        for (int j = 0; j < int(concentrations.size()); j++) {
+            if (int(concentrations[j].size()) != numberOfComponents) {
+                throw std::runtime_error("Calculation number " + std::to_string(i) + ": concentration row " + std::to_string(j) + " has " +
+                    std::to_string(concentrations[j].size()) + " entries, but " + std::to_string(numberOfComponents) + " components were given in 'component_indices'.");
+            }
+        }
+
+        validateCalculationSizes(i, numberOfComponents, componentIndices, int(molecules.size()),
+            int(concentrations.size()), concentrations.size() > 0 ? int(concentrations[0].size()) : 0, int(temperatures.size()),
+            int(referenceStateTypes.size()), int(referenceStateConcentrations.size()));
 
         calculation newCalculation(numberOfComponents);
+        newCalculation.componentIndices = componentIndices;
 
         for (int j = 0; j < numberOfComponents; j++) {
-            std::shared_ptr<molecule> thisMolecule = molecules[componentList[j].get<int>()];
+            std::shared_ptr<molecule> thisMolecule = molecules[componentIndices[j]];
 
             for (int k = 0; k < thisMolecule->segments.size(); k++) {
                 newCalculation.segments.add((unsigned short)j, thisMolecule->segments.SegmentTypeGroup[k],
@@ -170,10 +216,6 @@ void loadCalculationsOnCLI(const json& calculationsOnCLI) {
         newCalculation.segments.sort();
         newCalculation.segments.shrink_to_fit();
 
-        // concentrations and temperatures
-        auto temperatures = calculationDict["temperatures"].template get<std::vector<double>>();
-        auto concentrations = calculationDict["concentrations"].template get<std::vector<std::vector<double>>>();
-
         for (int j = 0; j < concentrations.size(); j++) {
             std::vector<double> rowConcentration;
 
@@ -184,8 +226,8 @@ void loadCalculationsOnCLI(const json& calculationsOnCLI) {
                 rowConcentration.push_back(val);
             }
 
-            if (abs(1.0f - tempSumOfConcentrations) > MAX_CONCENTRATION_DIFF_FROM_ZERO) {
-                throw std::runtime_error("For calculation number " + std::to_string(i) + ", the concentrations do not add up to unity. residual concentration: " + std::to_string(abs(1.0f - tempSumOfConcentrations)));
+            if (std::abs(1.0 - tempSumOfConcentrations) > MAX_CONCENTRATION_DIFF_FROM_ZERO) {
+                throw std::runtime_error("For calculation number " + std::to_string(i) + ", the concentrations do not add up to unity. residual concentration: " + std::to_string(std::abs(1.0 - tempSumOfConcentrations)));
             }
 
             double temperature = static_cast<double>(temperatures[j]);
@@ -194,29 +236,18 @@ void loadCalculationsOnCLI(const json& calculationsOnCLI) {
             newCalculation.concentrations.push_back(rowConcentration);
         }
 
-        std::vector<std::vector<double>> referenceStateConcentrations;
-        if (calculationDict.contains("reference_state_concentrations")) {
-            referenceStateConcentrations = calculationDict["reference_state_concentrations"].template get<std::vector<std::vector<double>>>();
-
-            if (referenceStateConcentrations.size() != newCalculation.concentrations.size()) {
-                throw std::runtime_error("concentrations and referenceStateConcentrations of calculation number " + std::to_string(i) + " have different sizes.");
-            }
-        }
-
         newCalculation.originalNumberOfCalculations = static_cast<unsigned short>(newCalculation.concentrations.size());
+        const int startIndexOfReferenceStates = int(newCalculation.originalNumberOfCalculations);
 
         // reference states
-        auto referenceStateTypes = calculationDict["reference_state_types"].get<std::vector<int>>();
         for (int j = 0; j < referenceStateTypes.size(); j++) {
             int referenceStateType = referenceStateTypes[j];
 
             newCalculation.referenceStateType.push_back(static_cast<unsigned short>(referenceStateType));
 
             double tempSumOfConcentrations = 0;
-            if (calculationDict.contains("reference_state_concentrations")) {
-                for (int k = 0; k < referenceStateConcentrations[j].size(); k++) {
-                    tempSumOfConcentrations += static_cast<double>(referenceStateConcentrations[j][k]);
-                }
+            for (int k = 0; k < referenceStateConcentrations[j].size(); k++) {
+                tempSumOfConcentrations += static_cast<double>(referenceStateConcentrations[j][k]);
             }
 
             if (referenceStateType == 0) { // Pure component
@@ -232,7 +263,7 @@ void loadCalculationsOnCLI(const json& calculationsOnCLI) {
                     }
 
                     double temperature = static_cast<double>(temperatures[j]);
-                    int referenceStateCalculationIndex = static_cast<int>(newCalculation.addOrFindArrayIndexForConcentration(referenceStateConcentration, temperature));
+                    int referenceStateCalculationIndex = static_cast<int>(newCalculation.addOrFindArrayIndexForConcentration(referenceStateConcentration, temperature, startIndexOfReferenceStates));
                     thisReferenceStateCalculationIndices.push_back(referenceStateCalculationIndex);
                 }
                 newCalculation.referenceStateCalculationIndices.push_back(thisReferenceStateCalculationIndices);
@@ -251,7 +282,7 @@ void loadCalculationsOnCLI(const json& calculationsOnCLI) {
                         }
 
                         double temperature = static_cast<double>(temperatures[j]);
-                        int referenceStateCalculationIndex = static_cast<int>(newCalculation.addOrFindArrayIndexForConcentration(referenceStateConcentration, temperature));
+                        int referenceStateCalculationIndex = static_cast<int>(newCalculation.addOrFindArrayIndexForConcentration(referenceStateConcentration, temperature, startIndexOfReferenceStates));
                         thisReferenceStateCalculationIndices.push_back(referenceStateCalculationIndex);
                     }
                     else {
@@ -261,21 +292,22 @@ void loadCalculationsOnCLI(const json& calculationsOnCLI) {
                 newCalculation.referenceStateCalculationIndices.push_back(thisReferenceStateCalculationIndices);
             }
             else if (referenceStateType == 2) { // Reference mixture
+                if (referenceStateConcentrations[j].size() != newCalculation.components.size()) {
+                    throw std::runtime_error("Calculation number " + std::to_string(i) + ", concentration " + std::to_string(j) + ": reference state type 2 needs a reference state concentration with " +
+                        std::to_string(newCalculation.components.size()) + " entries in 'reference_state_concentrations', but " + std::to_string(referenceStateConcentrations[j].size()) + " were given.");
+                }
+
                 std::vector<double> referenceStateConcentration;
                 for (int m = 0; m < numberOfComponents; m++) {
                     referenceStateConcentration.push_back(static_cast<double>(referenceStateConcentrations[j][m]));
                 }
 
-                if (referenceStateConcentrations[j].size() != newCalculation.components.size()) {
-                    throw std::runtime_error("A reference state concentration was specified with the wrong amount of concentrations.");
-                }
-
-                if (abs(1.0f - tempSumOfConcentrations) > MAX_CONCENTRATION_DIFF_FROM_ZERO) {
-                    throw std::runtime_error("For calculation number " + std::to_string(i) + ", the reference concentrations do not add up to unity. residual concentration: " + std::to_string(abs(1.0f - tempSumOfConcentrations)));
+                if (std::abs(1.0 - tempSumOfConcentrations) > MAX_CONCENTRATION_DIFF_FROM_ZERO) {
+                    throw std::runtime_error("For calculation number " + std::to_string(i) + ", the reference concentrations do not add up to unity. residual concentration: " + std::to_string(std::abs(1.0 - tempSumOfConcentrations)));
                 }
 
                 double temperature = static_cast<double>(temperatures[j]);
-                int referenceStateCalculationIndex = static_cast<int>(newCalculation.addOrFindArrayIndexForConcentration(referenceStateConcentration, temperature));
+                int referenceStateCalculationIndex = static_cast<int>(newCalculation.addOrFindArrayIndexForConcentration(referenceStateConcentration, temperature, startIndexOfReferenceStates));
 
                 std::vector<int> thisReferenceStateCalculationIndices;
                 for (int m = 0; m < numberOfComponents; m++) {
@@ -414,7 +446,7 @@ int main(int argc, char** argv)
             }
             if (argc == 3) {
                 outputFilePath = argv[2];
-                if (!endsWith(inputFilePath, ".json")) {
+                if (!endsWith(outputFilePath, ".json")) {
                     throw std::runtime_error("The output json file path has to end in '.json'");
                 }
             }
@@ -440,6 +472,8 @@ int main(int argc, char** argv)
         for (int i = 0; i < inputFileData["calculations"].size(); i++){
             calculationIndices.push_back(i);
         }
+        // sets area and volume of monoatomic cations from the given radii as in the python module
+        prepareMoleculesForCalculation(param);
         calculate(calculationIndices);
 
         json outputJson = json::object();
@@ -472,6 +506,9 @@ int main(int argc, char** argv)
 
 
         std::ofstream o(outputFilePath);
+        if (o.fail()) {
+            throw std::runtime_error("The output file could not be written: " + outputFilePath);
+        }
         o << std::setw(4) << outputJson << std::endl;
 
     }

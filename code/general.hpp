@@ -6,6 +6,12 @@
 
 #pragma once
 
+#include <algorithm>
+#include <memory>
+#include <mutex>
+#include <string>
+#include <vector>
+
 // CMake sets one OPENCOMSORS_SIMD_* macro. If the project is built outside
 // CMake, choose a conservative backend from compiler-provided architecture macros.
 #if !defined(OPENCOMSORS_SIMD_FMA) && !defined(OPENCOMSORS_SIMD_AVX) && !defined(OPENCOMSORS_SIMD_SSE3) && !defined(OPENCOMSORS_SIMD_NEON) && !defined(OPENCOMSORS_SIMD_SCALAR)
@@ -29,36 +35,36 @@
 #endif
 
 #if defined(_DEBUG) || defined(DEBUG)
-std::string compilation_mode = " compile mode: DEBUG";
+inline std::string compilation_mode = " compile mode: DEBUG";
 #pragma message(" compile mode: DEBUG")
 #else
-std::string compilation_mode = " compile mode: RELEASE";
+inline std::string compilation_mode = " compile mode: RELEASE";
 #pragma message(" compile mode: RELEASE")
 #endif
 
 #if defined(_OPENMP)
-std::string OPENMP_parallelization = "       openmp: activated";
+inline std::string OPENMP_parallelization = "       openmp: activated";
 #pragma message("       openmp: activated")
 #else
-std::string OPENMP_parallelization = "      openmp: deactivated";
+inline std::string OPENMP_parallelization = "      openmp: deactivated";
 #pragma message("       openmp: deactivated")
 #endif
 
 #if defined(OPENCOMSORS_SIMD_FMA)
 #pragma message("vectorization: FMA")
-std::string vectorization_level = "vectorization: FMA";
+inline std::string vectorization_level = "vectorization: FMA";
 #elif defined(OPENCOMSORS_SIMD_AVX)
 #pragma message("vectorization: AVX")
-std::string vectorization_level = "vectorization: AVX";
+inline std::string vectorization_level = "vectorization: AVX";
 #elif defined(OPENCOMSORS_SIMD_SSE3)
 #pragma message("vectorization: SSE3")
-std::string vectorization_level = "vectorization: SSE3";
+inline std::string vectorization_level = "vectorization: SSE3";
 #elif defined(OPENCOMSORS_SIMD_NEON)
 #pragma message("vectorization: NEON")
-std::string vectorization_level = "vectorization: NEON";
+inline std::string vectorization_level = "vectorization: NEON";
 #else
 #pragma message("vectorization: SCALAR")
-std::string vectorization_level = "vectorization: SCALAR";
+inline std::string vectorization_level = "vectorization: SCALAR";
 #endif
 
 #if defined(__GNUC__)
@@ -77,21 +83,34 @@ std::string vectorization_level = "vectorization: SCALAR";
 using calcType = double;
 using MatrixCalcType = Eigen::MatrixXd;
 using VectorCalcType = Eigen::VectorXd;
-std::string precision = "    precision: double";
+inline std::string precision = "    precision: double";
 #pragma message("    precision: double")
 #else
 using calcType = float;
 using MatrixCalcType = Eigen::MatrixXf;
 using VectorCalcType = Eigen::VectorXf;
-std::string precision = "    precision: single";
+inline std::string precision = "    precision: single";
 #pragma message("    precision: single")
 #endif
 
 #include "types.hpp"
 
-std::vector<std::shared_ptr<molecule>> molecules;
-std::vector<calculation> calculations;
-std::vector<std::string> warnings;
+// global state, inline (C++17) so that the header can be included in more than one translation unit
+inline std::vector<std::shared_ptr<molecule>> molecules;
+inline std::vector<calculation> calculations;
+inline std::vector<std::string> warnings;
+inline std::mutex warningsMutex;
 
-parameters param;
-int n_ex = -1;
+inline parameters param;
+inline int n_ex = -1; // only used to check the order of the calls loadMolecules, loadCalculations, calculate
+
+inline bool monoatomicCationsResized = false;         // area and volume of monoatomic cations set from the radii
+inline bool sigmaProfilesUsedInCalculation = false;   // a calculation was run since the molecules were loaded
+
+// thread safe, warnings can be added from within OpenMP parallel regions
+inline void addWarning(const std::string& warning) {
+    std::lock_guard<std::mutex> guard(warningsMutex);
+    if (std::find(warnings.begin(), warnings.end(), warning) == warnings.end()) {
+        warnings.push_back(warning);
+    }
+}

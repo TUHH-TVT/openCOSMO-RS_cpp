@@ -6,7 +6,7 @@
 #pragma once
 
 // this code is not optimized for fast calculation yet
-void calculateContactStatistics(calculation& _calculation, MatrixCalcType& A_int_calcType, std::vector<Eigen::MatrixXd>& partialInteractionMatrices, MatrixCalcType& Tau_calcType, calcType* Gamma, int i_concentration, Eigen::Tensor<double, 4, Eigen::RowMajor>& temporary_averageInteractionEnergies, Eigen::Tensor<double, 3, Eigen::RowMajor>& temporary_partialMolarEnergies, parameters& param) {
+void calculateContactStatistics(calculation& _calculation, MatrixCalcType& A_int_calcType, std::vector<Eigen::MatrixXd>& partialInteractionMatrices, MatrixCalcType& Tau_calcType, calcType* Gamma, int i_concentration, Eigen::Tensor<double, 3, Eigen::RowMajor>& temporary_contactStatistics, Eigen::Tensor<double, 4, Eigen::RowMajor>& temporary_averageInteractionEnergies, Eigen::Tensor<double, 3, Eigen::RowMajor>& temporary_partialMolarEnergies, parameters& param) {
 
 	/* Calculate contact statistics for all compositions.*/
 	const size_t numberOfComponents = _calculation.components.size();
@@ -49,16 +49,12 @@ void calculateContactStatistics(calculation& _calculation, MatrixCalcType& A_int
 			Eigen::ArrayXXd temp = (gamma_vector.array() * N_i_I(mol_i, Eigen::indexing::all).transpose().array()).matrix() * (gamma_vector.array() * N_i_I(mol_j, Eigen::indexing::all).transpose().array()).matrix().transpose();
 			Eigen::ArrayXXd weighting = temp * Tau;
 
-			// contact statistics are directly written to the output
-			if (i_concentration < _calculation.originalNumberOfCalculations) {
-				_calculation.contactStatistics(i_concentration, mol_i, mol_j) = float(weighting.sum() * factor / N_mol(mol_i));
-			}
-			temporary_averageInteractionEnergies(i_concentration, 0, mol_i, mol_j) = float(N_AVOGADRO * 0.5 * factor * (weighting * A_int.array()).sum());
+			// i_concentration is the internal (sorted) index, the output is filled from the temporary array afterwards
+			temporary_contactStatistics(i_concentration, mol_i, mol_j) = weighting.sum() * factor / N_mol(mol_i);
+			temporary_averageInteractionEnergies(i_concentration, 0, mol_i, mol_j) = N_AVOGADRO * 0.5 * factor * (weighting * A_int.array()).sum();
 
 			for (int k = 0; k < param.numberOfPartialInteractionMatrices; k++) {
-				for (int mol_j = 0; mol_j < numberOfComponents; mol_j++) {
-					temporary_averageInteractionEnergies(i_concentration, k + 1, mol_i, mol_j) = float(N_AVOGADRO * 0.5 * factor * (weighting * partialInteractionMatrices[k].array()).sum());
-				}
+				temporary_averageInteractionEnergies(i_concentration, k + 1, mol_i, mol_j) = N_AVOGADRO * 0.5 * factor * (weighting * partialInteractionMatrices[k].array()).sum();
 			}
 		}
 	}
@@ -112,10 +108,10 @@ void calculateContactStatistics(calculation& _calculation, MatrixCalcType& A_int
 			Eigen::ArrayXXd temp3 = sum_xN * ((ndpss_dni_mol_i.colwise() * X_vector.array()) + (X_gammai_gammajT_Tau.colwise() * ndX_dni(Eigen::indexing::all, mol_i)));
 			Eigen::ArrayXXd weighting = (0.5 * (X_gammai_gammajT_Tau.colwise() * X_vector.array() * N_mol(mol_i) + temp3));
 
-			temporary_partialMolarEnergies(i_concentration, 0, mol_i) = float((weighting * (A_int.cast<double>()).array()).sum());
+			temporary_partialMolarEnergies(i_concentration, 0, mol_i) = (weighting * A_int.array()).sum();
 
 			for (int k = 0; k < param.numberOfPartialInteractionMatrices; k++) {
-				temporary_partialMolarEnergies(i_concentration, k + 1, mol_i) = float((weighting * partialInteractionMatrices[k].array()).sum());
+				temporary_partialMolarEnergies(i_concentration, k + 1, mol_i) = (weighting * partialInteractionMatrices[k].array()).sum();
 			}
 		}
 

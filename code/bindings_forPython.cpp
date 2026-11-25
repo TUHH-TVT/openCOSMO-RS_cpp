@@ -9,6 +9,7 @@
 
 #include <pybind11/pybind11.h>
 #include <pybind11/numpy.h>
+#include <pybind11/stl.h>
 namespace py = pybind11;
 using namespace pybind11::literals;
 
@@ -77,17 +78,24 @@ void loadParametersOnPython(py::dict parameters) {
 		py::dict dGsolv_tau = parameters["dGsolv_tau"];
 
 		for (auto item : dGsolv_tau) {
-			std::string key = item.first.cast<std::string>();
-			param.dGsolv_tau[std::stoi(key)] = item.second.cast<double>();
+			std::string key = py::str(item.first).cast<std::string>();
+			param.dGsolv_tau[parseAtomicNumberKey(key, "dGsolv_tau")] = item.second.cast<double>();
 		}
+
+		// one entry per loaded molecule (order of the component paths)
+		if (!parameters.contains("dGsolv_E_gas") || !parameters.contains("dGsolv_numberOfAtomsInRing")) {
+			throw std::runtime_error("To calculate solvation energies the parameters 'dGsolv_E_gas' and 'dGsolv_numberOfAtomsInRing' (one entry per loaded molecule) are needed in addition to 'dGsolv_eta'.");
+		}
+		param.dGsolv_E_gas = parameters["dGsolv_E_gas"].cast<std::vector<double>>();
+		param.dGsolv_numberOfAtomsInRing = parameters["dGsolv_numberOfAtomsInRing"].cast<std::vector<int>>();
 	}
 
 	if (parameters.contains("radii")) {
 		py::dict radii = parameters["radii"];
 
 		for (auto item : radii) {
-			std::string key = item.first.cast<std::string>();
-			param.R_i[std::stoi(key)] = item.second.cast<double>();
+			std::string key = py::str(item.first).cast<std::string>();
+			param.R_i[parseAtomicNumberKey(key, "radii")] = item.second.cast<double>();
 		}
 	}
 	// experimental parameters for prototyping
@@ -126,12 +134,11 @@ void loadMoleculesOnPython(py::dict options, py::dict parameters, py::list compo
 	param.sw_COSMOfiles_type = options["sw_SR_COSMOfiles_type"].cast<std::string>();
 	param.sw_SR_polarizabilities = options["sw_SR_polarizabilities"].cast<int>();
 
+	std::vector<std::string> partialInteractionMatrixNames;
 	if (param.sw_calculateContactStatisticsAndAdditionalProperties != 0) {
-		py::list partialInteractionMatrices = options["sw_SR_partialInteractionMatrices"];
-		param.numberOfPartialInteractionMatrices = int(partialInteractionMatrices.size());
-	} else {
-		param.numberOfPartialInteractionMatrices = 0;
+		partialInteractionMatrixNames = options["sw_SR_partialInteractionMatrices"].cast<std::vector<std::string>>();
 	}
+	setPartialInteractionMatrices(param, partialInteractionMatrixNames);
 
 	param.sw_atomicNumber = options["sw_SR_atomicNumber"].cast<int>();
 	param.sw_misfit = options["sw_SR_misfit"].cast<int>();
@@ -139,10 +146,15 @@ void loadMoleculesOnPython(py::dict options, py::dict parameters, py::list compo
 	if (param.sw_misfit < 0 || param.sw_misfit > 2) {
 		throw std::runtime_error("sw_SR_misfit should have one of the following values: [0, 1, 2].");
 	}
+
+	if (param.sw_SR_polarizabilities > 0 && param.sw_atomicNumber == 0) {
+		throw std::runtime_error("sw_SR_polarizabilities > 0 requires sw_SR_atomicNumber = 1, as the fluorine correction and the ionization potentials depend on the atomic number.");
+	}
 	param.sw_skip_COSMOSPACE_errors = options["sw_skip_COSMOSPACE_errors"].cast<int>();
 
 	// parameters
 	loadParametersOnPython(parameters);
+	validateSolvationEnergyParameters(param, int(componentPaths.size()));
 
 	for (auto componentPath : componentPaths) {
 		molecule newMolecule = loadNewMolecule(param, componentPath.cast<std::string>());
@@ -155,12 +167,101 @@ void loadMoleculesOnPython(py::dict options, py::dict parameters, py::list compo
 
 }
 
+std::string shapeToString(const std::vector<long>& shape) {
+	std::string s = "(";
+	for (size_t k = 0; k < shape.size(); k++) s += (k ? ", " : "") + std::to_string(shape[k]);
+	return s + ")";
+}
+
+// returns the data pointer of an output array the results are written into directly,
+// throws if the array cannot be used without a copy
+double* getOutputArrayData(py::dict calculationDict, const std::string& key, const std::vector<long>& expectedShape, int calculationNumber) {
+
+	const std::string prefix = "Calculation number " + std::to_string(calculationNumber) + ": the output array '" + key + "' ";
+	const std::string expected = " Expected a writeable numpy array with dtype float64, C order and shape " + shapeToString(expectedShape) + ".";
+
+	if (!calculationDict.contains(key.c_str())) {
+		throw std::runtime_error(prefix + "is missing." + expected);
+	}
+	py::object obj = calculationDict[key.c_str()];
+	if (!py::isinstance<py::array>(obj)) {
+		throw std::runtime_error(prefix + "is not a numpy array." + expected);
+	}
+	py::array arr = py::reinterpret_borrow<py::array>(obj);
+
+	std::vector<long> shape;
+	for (py::ssize_t k = 0; k < arr.ndim(); k++) shape.push_back(long(arr.shape(k)));
+
+	if (!arr.dtype().is(py::dtype::of<double>())) {
+		throw std::runtime_error(prefix + "has dtype " + py::str(arr.dtype()).cast<std::string>() + "." + expected);
+	}
+	if (shape != expectedShape) {
+		throw std::runtime_error(prefix + "has shape " + shapeToString(shape) + "." + expected);
+	}
+	if (!(arr.flags() & py::array::c_style)) {
+		throw std::runtime_error(prefix + "is not C-contiguous (e.g. Fortran order, transposed or sliced)." + expected);
+	}
+	if (!arr.writeable()) {
+		throw std::runtime_error(prefix + "is read-only." + expected);
+	}
+
+	return static_cast<double*>(arr.mutable_data());
+}
+
+// The results are written directly into the numpy arrays of the calculation dictionary, therefore no copies
+// are allowed: the arrays have to exist with dtype float64, C order and exactly the expected shape.
+// This is done in loadCalculations and again in every calculate, so that the results are always written into
+// the arrays currently stored in the dictionary (the dictionaries passed to calculate keep them alive).
+void bindOutputArrays(calculation& _calculation, py::dict calculationDict, int calculationNumber) {
+
+	const long nRows = long(_calculation.originalNumberOfCalculations);
+	const long nComp = long(_calculation.components.size());
+	const long nMatrices = long(param.numberOfPartialInteractionMatrices) + 1; // +1 because A_int is the first one
+
+	using MapType = Eigen::Map<Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>>;
+
+	double* data = getOutputArrayData(calculationDict, "ln_gamma_x_SR_combinatorial_calc", { nRows, nComp }, calculationNumber);
+	new (&_calculation.lnGammaCombinatorial) MapType(data, nRows, nComp);
+
+	data = getOutputArrayData(calculationDict, "ln_gamma_x_SR_residual_calc", { nRows, nComp }, calculationNumber);
+	new (&_calculation.lnGammaResidual) MapType(data, nRows, nComp);
+
+	data = getOutputArrayData(calculationDict, "ln_gamma_x_SR_calc", { nRows, nComp }, calculationNumber);
+	new (&_calculation.lnGammaTotal) MapType(data, nRows, nComp);
+
+	if (calculationDict.contains("dGsolv")) {
+		data = getOutputArrayData(calculationDict, "dGsolv", { nRows, nComp }, calculationNumber);
+		new (&_calculation.dGsolv) MapType(data, nRows, nComp);
+	}
+	else {
+		new (&_calculation.dGsolv) MapType(nullptr, 0, 0);
+	}
+
+	if (param.sw_calculateContactStatisticsAndAdditionalProperties > 0) {
+
+		data = getOutputArrayData(calculationDict, "contact_statistics", { nRows, nComp, nComp }, calculationNumber);
+		new (&_calculation.contactStatistics) Eigen::TensorMap<Eigen::Tensor<double, 3, Eigen::RowMajor>>(data, nRows, nComp, nComp);
+
+		data = getOutputArrayData(calculationDict, "average_surface_energies", { nRows, nMatrices, nComp, nComp }, calculationNumber);
+		new (&_calculation.averageSurfaceEnergies) Eigen::TensorMap<Eigen::Tensor<double, 4, Eigen::RowMajor>>(data, nRows, nMatrices, nComp, nComp);
+
+		if (param.sw_calculateContactStatisticsAndAdditionalProperties == 2) {
+
+			data = getOutputArrayData(calculationDict, "partial_molar_energies", { nRows, nMatrices, nComp }, calculationNumber);
+			new (&_calculation.partialMolarEnergies) Eigen::TensorMap<Eigen::Tensor<double, 3, Eigen::RowMajor>>(data, nRows, nMatrices, nComp);
+		}
+	}
+}
+
 void loadCalculationsOnPython(py::list calculationsOnPython, bool reload = false) {
 
 	n_ex += 1;
 
 	if (reload) {
 		initialize(param, false, false, true, false);
+		// state after loadMolecules and loadCalculations (n_ex only checks the order of the calls,
+		// the new calculations are initialized in the next calculation as they are new)
+		n_ex = 2;
 	}
 	else {
 		if (n_ex != 2) {
@@ -191,13 +292,28 @@ void loadCalculationsOnPython(py::list calculationsOnPython, bool reload = false
 		py::dict calculationDict = calculationsOnPython[i];
 
 		// array of component indices
- 		py::list componentList = calculationDict["component_indices"];
-		int numberOfComponents = int(componentList.size());
+		std::vector<int> componentIndices = calculationDict["component_indices"].cast<std::vector<int>>();
+		int numberOfComponents = int(componentIndices.size());
+
+		// input arrays, the converted arrays are kept alive as long as their unchecked views are used
+		py::array_t<double, py::array::c_style | py::array::forcecast> temperaturesArray(calculationDict["temperatures"]);
+		py::array_t<double, py::array::c_style | py::array::forcecast> concentrationsArray(calculationDict["concentrations"]);
+		py::array_t<int, py::array::c_style | py::array::forcecast> referenceStateTypesArray(calculationDict["reference_state_types"]);
+		py::array_t<double, py::array::c_style | py::array::forcecast> referenceStateConcentrationsArray(calculationDict["reference_state_concentrations"]);
+
+		if (temperaturesArray.ndim() != 1 || concentrationsArray.ndim() != 2 || referenceStateTypesArray.ndim() != 1 || referenceStateConcentrationsArray.ndim() != 2) {
+			throw std::runtime_error("Calculation number " + std::to_string(i) + ": 'temperatures' and 'reference_state_types' have to be one-dimensional, 'concentrations' and 'reference_state_concentrations' two-dimensional.");
+		}
+
+		validateCalculationSizes(i, numberOfComponents, componentIndices, int(molecules.size()),
+			int(concentrationsArray.shape(0)), int(concentrationsArray.shape(1)), int(temperaturesArray.shape(0)),
+			int(referenceStateTypesArray.shape(0)), int(referenceStateConcentrationsArray.shape(0)));
 
 		calculation newCalculation(numberOfComponents);
+		newCalculation.componentIndices = componentIndices;
 
 		for (int j = 0; j < numberOfComponents; j++) {
-			std::shared_ptr<molecule> thisMolecule = molecules[componentList[j].cast<int>()];
+			std::shared_ptr<molecule> thisMolecule = molecules[componentIndices[j]];
 
 			for (int k = 0; k < thisMolecule->segments.size(); k++) {
 				newCalculation.segments.add((unsigned short)j, thisMolecule->segments.SegmentTypeGroup[k],
@@ -215,8 +331,8 @@ void loadCalculationsOnPython(py::list calculationsOnPython, bool reload = false
 		newCalculation.segments.shrink_to_fit();
 
 		// concentrations and temperatures
-		auto temperatures = py::array_t<double>(calculationDict["temperatures"]).unchecked<1>();
-		auto concentrations = py::array_t<double>(calculationDict["concentrations"]).unchecked<2>();
+		auto temperatures = temperaturesArray.unchecked<1>();
+		auto concentrations = concentrationsArray.unchecked<2>();
 
 		for (int j = 0; j < (size_t)concentrations.shape(0); j++) {
 
@@ -229,8 +345,8 @@ void loadCalculationsOnPython(py::list calculationsOnPython, bool reload = false
 				rowConcentration.push_back(val);
 			}
 
-			if (abs(1.0f - tempSumOfConcentrations) > MAX_CONCENTRATION_DIFF_FROM_ZERO) {
-				throw std::runtime_error("For calculation number " + std::to_string(i) + ", the concentrations do not add up to unity. residual concentration: " + std::to_string(abs(1.0f - tempSumOfConcentrations)));
+			if (std::abs(1.0 - tempSumOfConcentrations) > MAX_CONCENTRATION_DIFF_FROM_ZERO) {
+				throw std::runtime_error("For calculation number " + std::to_string(i) + ", the concentrations do not add up to unity. residual concentration: " + std::to_string(std::abs(1.0 - tempSumOfConcentrations)));
 			}
 
 			double temperature = (double)temperatures(j);
@@ -239,16 +355,13 @@ void loadCalculationsOnPython(py::list calculationsOnPython, bool reload = false
 			newCalculation.concentrations.push_back(rowConcentration);
 		}
 
-		auto referenceStateConcentrations = py::array_t<double>(calculationDict["reference_state_concentrations"]).unchecked<2>();
-
-		if (referenceStateConcentrations.shape(0) != newCalculation.concentrations.size()) {
-			throw std::runtime_error("concentrations and referenceStateConcentrations of calculation number " + std::to_string(i) + " have different sizes.\n");
-		}
+		auto referenceStateConcentrations = referenceStateConcentrationsArray.unchecked<2>();
 
 		newCalculation.originalNumberOfCalculations = (unsigned short)newCalculation.concentrations.size();
+		const int startIndexOfReferenceStates = int(newCalculation.originalNumberOfCalculations);
 
 		// reference states
-		auto referenceStateTypes = py::array_t<int>(calculationDict["reference_state_types"]).unchecked<1>();
+		auto referenceStateTypes = referenceStateTypesArray.unchecked<1>();
 		for (int j = 0; j < (size_t)referenceStateTypes.shape(0); j++) {
 
 
@@ -279,7 +392,7 @@ void loadCalculationsOnPython(py::list calculationsOnPython, bool reload = false
 					}
 
 					double temperature = (double)temperatures(j);
-					int referenceStateCalculationIndex = (int)newCalculation.addOrFindArrayIndexForConcentration(referenceStateConcentration, temperature);
+					int referenceStateCalculationIndex = (int)newCalculation.addOrFindArrayIndexForConcentration(referenceStateConcentration, temperature, startIndexOfReferenceStates);
 					thisReferenceStateCalculationIndices.push_back(referenceStateCalculationIndex);
 
 				}
@@ -302,7 +415,7 @@ void loadCalculationsOnPython(py::list calculationsOnPython, bool reload = false
 						}
 
 						double temperature = (double)temperatures(j);
-						int referenceStateCalculationIndex = (int)newCalculation.addOrFindArrayIndexForConcentration(referenceStateConcentration, temperature);
+						int referenceStateCalculationIndex = (int)newCalculation.addOrFindArrayIndexForConcentration(referenceStateConcentration, temperature, startIndexOfReferenceStates);
 						thisReferenceStateCalculationIndices.push_back(referenceStateCalculationIndex);
 					}
 					else {
@@ -314,21 +427,22 @@ void loadCalculationsOnPython(py::list calculationsOnPython, bool reload = false
 			}
 			else if (referenceStateType == 2) { // Reference mixture
 
+				if (referenceStateConcentrations.shape(1) != newCalculation.components.size()) {
+					throw std::runtime_error("Calculation number " + std::to_string(i) + ", concentration " + std::to_string(j) + ": reference state type 2 needs a reference state concentration with " +
+						std::to_string(newCalculation.components.size()) + " entries, but 'reference_state_concentrations' has " + std::to_string(referenceStateConcentrations.shape(1)) + " columns.");
+				}
+
 				std::vector<double> referenceStateConcentration;
 				for (int m = 0; m < numberOfComponents; m++) {
 					referenceStateConcentration.push_back((double)referenceStateConcentrations(j, m));
 				}
 
-				if (referenceStateConcentrations.shape(1) != newCalculation.components.size()) {
-					throw std::runtime_error("A reference state concentration was specified with the wrong amount of concentrations.");
-				}
-
-				if (abs(1.0f - tempSumOfConcentrations) > MAX_CONCENTRATION_DIFF_FROM_ZERO) {
-					throw std::runtime_error("For calculation number " + std::to_string(i) + ", the reference concentrations do not add up to unity. residual concentration: " + std::to_string(abs(1.0f - tempSumOfConcentrations)));
+				if (std::abs(1.0 - tempSumOfConcentrations) > MAX_CONCENTRATION_DIFF_FROM_ZERO) {
+					throw std::runtime_error("For calculation number " + std::to_string(i) + ", the reference concentrations do not add up to unity. residual concentration: " + std::to_string(std::abs(1.0 - tempSumOfConcentrations)));
 				}
 
 				double temperature = (double)temperatures(j);
-				int referenceStateCalculationIndex = (int)newCalculation.addOrFindArrayIndexForConcentration(referenceStateConcentration, temperature);
+				int referenceStateCalculationIndex = (int)newCalculation.addOrFindArrayIndexForConcentration(referenceStateConcentration, temperature, startIndexOfReferenceStates);
 
 				std::vector<int> thisReferenceStateCalculationIndices;
 				for (int m = 0; m < numberOfComponents; m++) {
@@ -354,53 +468,8 @@ void loadCalculationsOnPython(py::list calculationsOnPython, bool reload = false
 		// for this to work correctly the sizes of the n-dimensional numpy arrays and the type
 		// must be the same in python and c++ (float32/float) with same storage order: row major.
 
-		py::array_t<double> tempArray = py::array_t<double>(calculationDict["ln_gamma_x_SR_combinatorial_calc"]);
-		new (&newCalculation.lnGammaCombinatorial) Eigen::Map<Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>>(tempArray.mutable_data(),
-			int(newCalculation.originalNumberOfCalculations),
-			int(newCalculation.components.size()));
+		bindOutputArrays(newCalculation, calculationDict, i);
 
-		tempArray = py::array_t<double>(calculationDict["ln_gamma_x_SR_residual_calc"]);
-		new (&newCalculation.lnGammaResidual) Eigen::Map<Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>>(tempArray.mutable_data(),
-			int(newCalculation.originalNumberOfCalculations),
-			int(newCalculation.components.size()));
-
-		tempArray = py::array_t<double>(calculationDict["ln_gamma_x_SR_calc"]);
-		new (&newCalculation.lnGammaTotal) Eigen::Map<Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>>(tempArray.mutable_data(),
-			int(newCalculation.originalNumberOfCalculations),
-			int(newCalculation.components.size()));
-
-		if (calculationDict.contains("dGsolv")) {
-			tempArray = py::array_t<double>(calculationDict["dGsolv"]);
-			new (&newCalculation.dGsolv) Eigen::Map<Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>>(tempArray.mutable_data(),
-				int(newCalculation.originalNumberOfCalculations),
-				1);
-		}
-
-		if (param.sw_calculateContactStatisticsAndAdditionalProperties > 0) {
-
-			tempArray = py::array_t<double>(calculationDict["contact_statistics"]);
-			new (&newCalculation.contactStatistics) Eigen::TensorMap<Eigen::Tensor<double, 3, Eigen::RowMajor>>(tempArray.mutable_data(),
-				int(newCalculation.originalNumberOfCalculations),
-				int(newCalculation.components.size()),
-				int(newCalculation.components.size()));
-
-			tempArray = py::array_t<double>(calculationDict["average_surface_energies"]);
-			new (&newCalculation.averageSurfaceEnergies) Eigen::TensorMap<Eigen::Tensor<double, 4, Eigen::RowMajor>>(tempArray.mutable_data(),
-				int(newCalculation.originalNumberOfCalculations),
-				int(param.numberOfPartialInteractionMatrices) + 1, // +1 because A_int is the first one
-				int(newCalculation.components.size()),
-				int(newCalculation.components.size()));
-
-			if (param.sw_calculateContactStatisticsAndAdditionalProperties == 2) {
-
-				tempArray = py::array_t<double>(calculationDict["partial_molar_energies"]);
-				new (&newCalculation.partialMolarEnergies) Eigen::TensorMap<Eigen::Tensor<double, 3, Eigen::RowMajor>>(tempArray.mutable_data(),
-				int(newCalculation.originalNumberOfCalculations),
-				int(param.numberOfPartialInteractionMatrices) + 1, // +1 because A_int is the first one
-				int(newCalculation.components.size()));
-			}
-		}
-		
 		newCalculation.number = (int)i;
 		finishCalculationInitiation(newCalculation);
 		calculations.push_back(newCalculation);
@@ -421,13 +490,18 @@ py::list calculateOnPython(py::dict parameters, py::list calculationsOnPython, b
 
 	loadParametersOnPython(parameters);
 
-	if (param.sw_alwaysReloadSigmaProfiles == 1 && n_ex > 3) {
-		reloadAllMolecules();
+	// the solvation energy parameters can be changed here, the molar volume of the solvent is however
+	// only calculated when loading the molecules, hence they have to be given there already
+	validateSolvationEnergyParameters(param, int(molecules.size()));
+	if (param.dGsolv_E_gas.size() > 0) {
+		for (const std::shared_ptr<molecule>& _molecule : molecules) {
+			if (std::isnan(_molecule->molarVolumeAt25C)) {
+				throw std::runtime_error("To calculate solvation energies the parameters dGsolv_eta, dGsolv_E_gas, ... have to be given already when calling loadMolecules.");
+			}
+		}
 	}
 
-	if (param.sw_alwaysCalculateSizeRelatedParameters == 1 || (param.sw_alwaysCalculateSizeRelatedParameters == 0 && n_ex == 3)) {
-		resizeMonoatomicCations(param, molecules);
-	}
+	prepareMoleculesForCalculation(param);
 
 	const size_t numCalcs = calculationsOnPython.size();
 	std::vector<int> calculationIndices(numCalcs);
@@ -436,62 +510,96 @@ py::list calculateOnPython(py::dict parameters, py::list calculationsOnPython, b
 
 		calculationIndices[i] = calculationsOnPython[i]["index"].cast<int>();
 
+		if (calculationIndices[i] < 0 || calculationIndices[i] >= int(calculations.size())) {
+			throw std::runtime_error("The calculation at position " + std::to_string(i) + " has the index " + std::to_string(calculationIndices[i]) +
+				", but only " + std::to_string(calculations.size()) + " calculations were loaded.");
+		}
+
+		calculation& thisCalculation = calculations[calculationIndices[i]];
+		const int nRows = int(thisCalculation.originalNumberOfCalculations);
+		const int nComp = int(thisCalculation.components.size());
+
+		// write the results into the arrays currently stored in the dictionary
+		bindOutputArrays(thisCalculation, calculationsOnPython[i].cast<py::dict>(), calculationIndices[i]);
+
 		param.sw_reloadConcentrations = 0;
 		param.sw_reloadReferenceConcentrations = 0;
 
 		if (reloadConcentrations == true) {
 			param.sw_reloadConcentrations = 1;
-			auto concentrations = py::array_t<double>(calculationsOnPython[i]["concentrations"]).unchecked<2>();
-			for (int h = 0; h < calculations[calculationIndices[i]].originalNumberOfCalculations; h++) {
+			// kept alive as long as its unchecked view is used
+			py::array_t<double, py::array::c_style | py::array::forcecast> concentrationsArray(calculationsOnPython[i]["concentrations"]);
+			if (concentrationsArray.ndim() != 2 || concentrationsArray.shape(0) != nRows || concentrationsArray.shape(1) != nComp) {
+				throw std::runtime_error("Calculation number " + std::to_string(calculationIndices[i]) + ": reloaded 'concentrations' must keep the shape (" +
+					std::to_string(nRows) + ", " + std::to_string(nComp) + ").");
+			}
+			auto concentrations = concentrationsArray.unchecked<2>();
+			for (int h = 0; h < nRows; h++) {
 
-				int j = calculations[calculationIndices[i]].actualConcentrationIndices[h];
-
-				std::vector<double> rowConcentration;
+				// concentrations are stored sorted internally
+				int j = thisCalculation.actualConcentrationIndices[h];
 
 				double tempSumOfConcentrations = 0;
-				for (int k = 0; k < calculations[calculationIndices[i]].components.size(); k++) {
+				for (int k = 0; k < nComp; k++) {
 					double val = (double)concentrations(h, k);
 					tempSumOfConcentrations += val;
-					calculations[calculationIndices[i]].concentrations[j][k] = val;
+					thisCalculation.concentrations[j][k] = val;
 				}
 
-				if (abs(1.0f - tempSumOfConcentrations) > MAX_CONCENTRATION_DIFF_FROM_ZERO) {
-					throw std::runtime_error("A concentration does not add up to unity.");
+				if (std::abs(1.0 - tempSumOfConcentrations) > MAX_CONCENTRATION_DIFF_FROM_ZERO) {
+					throw std::runtime_error("Calculation number " + std::to_string(calculationIndices[i]) + ", concentration " + std::to_string(h) +
+						": the reloaded concentrations do not add up to unity. residual concentration: " + std::to_string(std::abs(1.0 - tempSumOfConcentrations)));
 				}
 			}
 		}
 		if (reloadReferenceConcentrations == true) {
 			param.sw_reloadReferenceConcentrations = 1;
-			auto referenceStateTypes = py::array_t<int>(calculationsOnPython[i]["reference_state_types"]).unchecked<1>();
-			auto referenceStateConcentrations = py::array_t<double>(calculationsOnPython[i]["reference_state_concentrations"]).unchecked<2>();
+			py::array_t<int, py::array::c_style | py::array::forcecast> referenceStateTypesArray(calculationsOnPython[i]["reference_state_types"]);
+			py::array_t<double, py::array::c_style | py::array::forcecast> referenceStateConcentrationsArray(calculationsOnPython[i]["reference_state_concentrations"]);
 
+			if (referenceStateTypesArray.ndim() != 1 || referenceStateTypesArray.shape(0) != nRows ||
+				referenceStateConcentrationsArray.ndim() != 2 || referenceStateConcentrationsArray.shape(0) != nRows || referenceStateConcentrationsArray.shape(1) != nComp) {
+				throw std::runtime_error("Calculation number " + std::to_string(calculationIndices[i]) + ": reloaded 'reference_state_types' must have " + std::to_string(nRows) +
+					" entries and 'reference_state_concentrations' the shape (" + std::to_string(nRows) + ", " + std::to_string(nComp) + ").");
+			}
+			auto referenceStateTypes = referenceStateTypesArray.unchecked<1>();
+			auto referenceStateConcentrations = referenceStateConcentrationsArray.unchecked<2>();
 
-			for (int j = 0; j < (size_t)referenceStateConcentrations.shape(0); j++) {
-				int referenceStateType = referenceStateTypes(j);
-				if (referenceStateType != 2) {
-					throw std::runtime_error("reloadReferenceConcentrations only makes sense if the referenceStateTypes == 2.\n");
+			for (int j = 0; j < nRows; j++) {
+				if (referenceStateTypes(j) != 2 || thisCalculation.referenceStateType[j] != 2) {
+					throw std::runtime_error("Calculation number " + std::to_string(calculationIndices[i]) + ", concentration " + std::to_string(j) +
+						": reloadReferenceConcentrations is only possible if all reference state types are 2.");
 				}
 			}
-			if (calculations[calculationIndices[i]].concentrations.size() != calculations[calculationIndices[i]].originalNumberOfCalculations * 2) {
-				throw std::runtime_error("The implementation currently assumes that every concentratoin has a unique reference concentration, this could and should be changed in the future.\n");
+			if (thisCalculation.concentrations.size() != size_t(nRows) * 2) {
+				throw std::runtime_error("Calculation number " + std::to_string(calculationIndices[i]) +
+					": reloadReferenceConcentrations requires every concentration to have its own unique reference concentration.");
 			}
 
-			for (int h = 0; h < calculations[calculationIndices[i]].originalNumberOfCalculations; h++) {
+			for (int h = 0; h < nRows; h++) {
 
-				std::vector<int> referenceStateCalculationIndices = calculations[calculationIndices[i]].referenceStateCalculationIndices[h];
+				const std::vector<int>& referenceStateCalculationIndices = thisCalculation.referenceStateCalculationIndices[h];
 
 				double tempSumOfConcentrations = 0;
-				for (int k = 0; k < calculations[calculationIndices[i]].components.size(); k++) {
-					int referenceStateCalculationIndex = referenceStateCalculationIndices[k];
+				for (int k = 0; k < nComp; k++) {
+					// the stored index refers to the unsorted concentrations, they are stored sorted internally
+					int referenceStateCalculationIndex = thisCalculation.actualConcentrationIndices[referenceStateCalculationIndices[k]];
 					double val = (double)referenceStateConcentrations(h, k);
 					tempSumOfConcentrations += val;
-					calculations[calculationIndices[i]].concentrations[referenceStateCalculationIndex][k] = val;
+					thisCalculation.concentrations[referenceStateCalculationIndex][k] = val;
 				}
 
-				if (abs(1.0f - tempSumOfConcentrations) > MAX_CONCENTRATION_DIFF_FROM_ZERO) {
-					throw std::runtime_error("A concentration does not add up to unity.");
+				if (std::abs(1.0 - tempSumOfConcentrations) > MAX_CONCENTRATION_DIFF_FROM_ZERO) {
+					throw std::runtime_error("Calculation number " + std::to_string(calculationIndices[i]) + ", concentration " + std::to_string(h) +
+						": the reloaded reference concentrations do not add up to unity. residual concentration: " + std::to_string(std::abs(1.0 - tempSumOfConcentrations)));
 				}
 			}
+		}
+	}
+
+	if (reloadConcentrations || reloadReferenceConcentrations) {
+		for (int calculationIndex : calculationIndices) {
+			checkConcentrationsAndTemperatures(calculations[calculationIndex]);
 		}
 	}
 

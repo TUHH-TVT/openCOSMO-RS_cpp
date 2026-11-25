@@ -145,6 +145,10 @@ molecule getMoleculeFromTurbomoleCOSMOfile(std::string& path) {
                 newMolecule.Volume = pow(0.529177249, 3) * newMolecule.Volume;
             }
 
+        }
+
+        // the energies are listed in the section $cosmo_energy after $coord_car
+        if (section == 1 || section == 3) {
             if (startsWith(currentLine, "Total energy + OC corr.")) {
                 currentLine = replace(trim(currentLine), " ", "");
                 parse_line(currentLine, " %*[^=]=%lf", &(newMolecule.epsilonInfinityTotalEnergy));
@@ -153,7 +157,7 @@ molecule getMoleculeFromTurbomoleCOSMOfile(std::string& path) {
 
         if (section == 2) {
             double atomPosition_X, atomPosition_Y, atomPosition_Z, atomRadius;
-            char temp_atomName[3];
+            char temp_atomName[4] = { 0 }; // %3s writes up to 3 characters plus the terminating null character
             parse_line(currentLine, "%*i %lf %lf %lf %3s %lf", &atomPosition_X, &atomPosition_Y, &atomPosition_Z, &temp_atomName, &atomRadius);
             atomPositions_X.push_back(0.529177249 * atomPosition_X);
             atomPositions_Y.push_back(0.529177249 * atomPosition_Y);
@@ -241,13 +245,21 @@ molecule getMoleculeFromORCACOSMOfile(std::string& path) {
     std::getline(cosmoFile, currentLine);
 
     std::vector<std::string> parts = split(currentLine, ':');
+    if (parts.size() < 2) {
+        throw std::runtime_error("The first line of the following ORCA COSMO file does not have the format '<name> : <method>': " + path);
+    }
     newMolecule.qmMethod = replace(trim(parts[1]), "COSMO", "CPCM");
     newMolecule.name = trim(parts[0]);
 
     scan_for(cosmoFile, "#ENERGY");
     std::getline(cosmoFile, currentLine);
     currentLine = trim(replace(currentLine, "FINAL SINGLE POINT ENERGY", ""));
-    newMolecule.epsilonInfinityTotalEnergy = std::stod(currentLine);
+    try {
+        newMolecule.epsilonInfinityTotalEnergy = std::stod(currentLine);
+    }
+    catch (...) {
+        throw std::runtime_error("The final single point energy could not be read from the following ORCA COSMO file: " + path);
+    }
 
     scan_for(cosmoFile, "#XYZ_FILE");
 
@@ -261,7 +273,7 @@ molecule getMoleculeFromORCACOSMOfile(std::string& path) {
         std::getline(cosmoFile, currentLine);
 
         double atomPosition_X, atomPosition_Y, atomPosition_Z;
-        char temp_atomName[3];
+        char temp_atomName[4] = { 0 }; // %3s writes up to 3 characters plus the terminating null character
         parse_line(currentLine, "%3s %lf %lf %lf", &temp_atomName , &atomPosition_X, &atomPosition_Y, &atomPosition_Z);
         atomPositions_X.push_back(atomPosition_X);
         atomPositions_Y.push_back(atomPosition_Y);
@@ -284,8 +296,8 @@ molecule getMoleculeFromORCACOSMOfile(std::string& path) {
     newMolecule.Area = pow(0.529177249, 2) * newMolecule.Area;
 
     currentLine = scan_for(cosmoFile, "# CPCM dielectric energy", "end");
-    float uncorrectedDialectricEnergy = 0.0;
-    parse_line(currentLine, "%f", &uncorrectedDialectricEnergy);
+    double uncorrectedDialectricEnergy = 0.0;
+    parse_line(currentLine, "%lf", &uncorrectedDialectricEnergy);
 
     scan_for(cosmoFile, "# CARTESIAN COORDINATES (A.U.) + RADII (A.U.)", "start", 1);
     for (int i = 0; i < numberOfAtoms; i++) {
@@ -329,8 +341,8 @@ molecule getMoleculeFromORCACOSMOfile(std::string& path) {
             throw std::runtime_error("Could not find the corrected dielectric energy entry in the orcacosmo file.");
         }
         currentLine = trim(replace(currentLine, "Corrected dielectric energy   =", ""));
-        float correctedDielectricEnergy = 0.0;
-        parse_line(currentLine, "%f", &correctedDielectricEnergy);
+        double correctedDielectricEnergy = 0.0;
+        parse_line(currentLine, "%lf", &correctedDielectricEnergy);
         newMolecule.epsilonInfinityTotalEnergy = newMolecule.epsilonInfinityTotalEnergy - uncorrectedDialectricEnergy + correctedDielectricEnergy;
 
         std::getline(cosmoFile, currentLine);
@@ -346,6 +358,11 @@ molecule getMoleculeFromORCACOSMOfile(std::string& path) {
 
             if (currentLine != "") {
 
+                if (segmentIndex >= int(segmentSigmas.size())) {
+                    throw std::runtime_error("The section #COSMO_corrected of the following file contains more corrected charges than the " +
+                        std::to_string(segmentSigmas.size()) + " surface points read before (is there an empty line within the surface points?): " + path);
+                }
+
                 double correctedSegmentCharge;
                 parse_line(currentLine, "%lf", &correctedSegmentCharge);
 
@@ -355,20 +372,25 @@ molecule getMoleculeFromORCACOSMOfile(std::string& path) {
         }
 
         if (segmentIndex != segmentSigmas.size()) {
-            throw std::runtime_error("Not enough corrected charges where found parsing the following file: " + path);
+            throw std::runtime_error("The section #COSMO_corrected contains " + std::to_string(segmentIndex) + " corrected charges, but " +
+                std::to_string(segmentSigmas.size()) + " surface points were read from the following file: " + path);
         }
+    }
 
-    // read polarizability tensor and isotropic polarizabilities
-    newMolecule.atomPolarizabilityTensors = Eigen::MatrixXd::Zero(numberOfAtoms, 6);
-    std::string matchingLine = scan_for(cosmoFile, "#ATOMIC POLARIZABILITIES", "start", 0, false);
-    if (matchingLine != "") {
+    // read the atomic polarizability tensors (xx, yy, zz, xy, xz, yz) if available,
+    // independent of the section #COSMO_corrected. Without this section the matrix stays empty.
+    // The search for #COSMO_corrected may have reached the end of the file, hence search from the beginning.
+    cosmoFile.clear();
+    cosmoFile.seekg(0);
+    std::string polarizabilityLine = scan_for(cosmoFile, "#ATOMIC POLARIZABILITIES", "start", 0, false);
+    if (polarizabilityLine != "") {
+        newMolecule.atomPolarizabilityTensors = Eigen::MatrixXd::Zero(numberOfAtoms, 6);
         std::getline(cosmoFile, currentLine);
         std::getline(cosmoFile, currentLine);
         for (int i = 0; i < numberOfAtoms; i++) {
             std::getline(cosmoFile, currentLine);
             parse_line(currentLine, "%*[^:] : %lf %lf %lf %lf %lf %lf", &newMolecule.atomPolarizabilityTensors(i, 0), &newMolecule.atomPolarizabilityTensors(i, 1), &newMolecule.atomPolarizabilityTensors(i, 2), &newMolecule.atomPolarizabilityTensors(i, 3), &newMolecule.atomPolarizabilityTensors(i, 4), &newMolecule.atomPolarizabilityTensors(i, 5));
         }
-    }
     }
     cosmoFile.close();
 
