@@ -2,7 +2,7 @@ name: Build wheels
 
 on:
   push:
-    branches: [main, ci-wheels]
+    branches: [main]
     tags: ["v*"]
   pull_request:
   workflow_dispatch:
